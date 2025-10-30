@@ -417,18 +417,37 @@ const extractJobDetails = async (page, url, retryCount = 0) => {
 
     await page.waitForTimeout(2000);
 
-    const jobBoardType = detectJobBoardType(url);
+    // Prioritize company-specific extraction
+    const company = detectCompany(url);
     let jobData;
 
-    switch (jobBoardType) {
-      case 'greenhouse':
+    switch (company) {
+      case 'bigid':
+        jobData = await extractBigIDJob(page);
+        break;
+      case 'eyecarecenter':
+        jobData = await extractEyeCareCenterJob(page);
+        break;
+      case 'lob':
+        jobData = await extractLobJob(page);
+        break;
+      case 'elixirr':
+        // Elixirr uses standard Greenhouse
         jobData = await extractGreenhouseJob(page);
         break;
-      case 'lever':
-        jobData = await extractLeverJob(page);
-        break;
       default:
-        jobData = await extractGenericJob(page);
+        // Fall back to board type detection
+        const jobBoardType = detectJobBoardType(url);
+        switch (jobBoardType) {
+          case 'greenhouse':
+            jobData = await extractGreenhouseJob(page);
+            break;
+          case 'lever':
+            jobData = await extractLeverJob(page);
+            break;
+          default:
+            jobData = await extractGenericJob(page);
+        }
     }
 
     return {
