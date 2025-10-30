@@ -90,8 +90,8 @@ const extractJobDetails = async (page, url, retryCount = 0) => {
 const runStage3 = async () => {
   log.info('Starting Stage 3: Job Details Extractor...');
 
-  const inputFile = path.join(config.output.dir, 'job_links.csv');
-  const outputFile = path.join(config.output.dir, 'jobs_data.csv');
+  const inputFile = path.join(config.output.dir, 'job_links_test.csv');
+  const outputFile = path.join(config.output.dir, 'jobs_data_test.csv');
 
   const jobURLs = readCSV(inputFile, 'url');
   if (jobURLs.length === 0) {
