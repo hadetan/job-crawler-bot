@@ -390,17 +390,35 @@ const extractWithIntelligentAnalysis = async (page) => {
         }
       }
 
-      // Sort by score and take top containers
+      // Sort by score
       bestContainers.sort((a, b) => b.score - a.score);
-      const topContainers = bestContainers.slice(0, 3).map(c => c.container);
 
-      // Extract HTML from selected containers
-      let combinedHTML = '';
-      for (const container of topContainers) {
-        combinedHTML += container.innerHTML + '\n\n';
+      // Remove nested containers to avoid duplication
+      const uniqueContainers = [];
+      for (const candidate of bestContainers) {
+        let isNested = false;
+        for (const existing of uniqueContainers) {
+          // Check if candidate is inside existing
+          if (existing.container.contains(candidate.container)) {
+            isNested = true;
+            break;
+          }
+          // Check if existing is inside candidate (replace if so)
+          if (candidate.container.contains(existing.container)) {
+            const index = uniqueContainers.indexOf(existing);
+            uniqueContainers.splice(index, 1);
+            break;
+          }
+        }
+        if (!isNested) {
+          uniqueContainers.push(candidate);
+        }
       }
 
-      return combinedHTML;
+      // Take only the best unique container (not multiple to avoid duplication)
+      const topContainer = uniqueContainers.length > 0 ? uniqueContainers[0].container : null;
+
+      return topContainer ? topContainer.innerHTML : '';
     });
 
     // Convert HTML to text
