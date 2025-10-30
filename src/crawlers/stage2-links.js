@@ -20,6 +20,50 @@ const isValidJobURL = (url) => {
   }
 };
 
+/**
+ * Extract numeric job ID (4+ digits) from URL
+ * @param {string} url - The URL to extract job ID from
+ * @returns {string|null} - Job ID as string, or null if not found
+ *
+ * Searches entire URL for sequences of 4+ consecutive digits.
+ * If multiple matches found, returns the longest one (most likely the job ID).
+ * If same length, returns the last one.
+ *
+ * Examples:
+ * - https://careers.roblox.com/jobs/7179133 → "7179133"
+ * - https://stripe.com/us/jobs/listing/engineer/7176975 → "7176975"
+ * - https://example.com/job?gh_jid=7220394 → "7220394"
+ * - https://stripe.com/jobs/benefits → null
+ */
+const extractJobId = (url) => {
+  if (!url) return null;
+
+  try {
+    // Find all sequences of 4+ consecutive digits in the entire URL
+    const matches = url.match(/\d{4,}/g);
+
+    if (!matches || matches.length === 0) {
+      return null;
+    }
+
+    // If multiple matches, return the longest one (most likely the job ID)
+    // If same length, return the last one (typically appears later in URL path)
+    const longestMatch = matches.reduce((longest, current) => {
+      if (current.length > longest.length) {
+        return current;
+      } else if (current.length === longest.length) {
+        // Same length: prefer the later one (return current)
+        return current;
+      }
+      return longest;
+    });
+
+    return longestMatch;
+  } catch {
+    return null;
+  }
+};
+
 const isJobDetailPage = (url) => {
   try {
     const urlObj = new URL(url);
