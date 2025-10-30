@@ -1,12 +1,69 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
+const fs = require('fs');
 const pLimit = require('p-limit');
 const { convert } = require('html-to-text');
 const config = require('../config');
-const { readCSV, writeCSV, normalizeURL } = require('../utils/csv-handler');
+const { readCSV, normalizeURL } = require('../utils/csv-handler');
 const log = require('../utils/logger');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const extractCompanyName = (url) => {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.replace(/^www\./, '');
+
+    // For greenhouse boards: boards.greenhouse.io/company-name
+    if (hostname.includes('greenhouse.io')) {
+      const pathParts = urlObj.pathname.split('/').filter(Boolean);
+      if (pathParts.length > 0) {
+        return pathParts[0];
+      }
+    }
+
+    // For other domains, use the main domain name
+    const domainParts = hostname.split('.');
+    if (domainParts.length >= 2) {
+      return domainParts[domainParts.length - 2];
+    }
+
+    return hostname.replace(/\./g, '_');
+  } catch {
+    return 'unknown';
+  }
+};
+
+const getProcessedJobs = (jobsDir) => {
+  const trackingFile = path.join(jobsDir, '.processed_urls.txt');
+  if (!fs.existsSync(trackingFile)) {
+    return new Set();
+  }
+  const content = fs.readFileSync(trackingFile, 'utf-8');
+  return new Set(content.split('\n').filter(Boolean).map(normalizeURL));
+};
+
+const markJobAsProcessed = (jobsDir, url) => {
+  const trackingFile = path.join(jobsDir, '.processed_urls.txt');
+  fs.appendFileSync(trackingFile, url + '\n', 'utf-8');
+};
+
+const getNextJobNumber = (companyDir) => {
+  if (!fs.existsSync(companyDir)) {
+    return 1;
+  }
+
+  const files = fs.readdirSync(companyDir)
+    .filter(f => f.match(/^\d+\.txt$/))
+    .map(f => parseInt(f.replace('.txt', '')))
+    .filter(n => !isNaN(n));
+
+  if (files.length === 0) {
+    return 1;
+  }
+
+  return Math.max(...files) + 1;
+};
 
 const tryExtractField = async (page, selectors) => {
   for (const selector of selectors) {
@@ -28,10 +85,10 @@ const tryExtractHTML = async (page, selectors) => {
       const html = await page.$eval(selector, el => el.innerHTML);
       if (html && html.trim()) {
         const plainText = convert(html, {
-          wordwrap: false,
-          preserveNewlines: false
+          wordwrap: 130,
+          preserveNewlines: true
         });
-        return plainText.replace(/\n+/g, ' ').trim();
+        return plainText.trim();
       }
     } catch (error) {
       // Selector not found, try next one
@@ -47,13 +104,13 @@ const tryExtractMultiple = async (page, selectors) => {
         elements.map(el => el.textContent || el.innerText).filter(Boolean)
       );
       if (items.length > 0) {
-        return items.map(item => item.trim()).join('; ');
+        return items.map(item => item.trim());
       }
     } catch (error) {
       // Selector not found, try next one
     }
   }
-  return '';
+  return [];
 };
 
 const extractJobDetails = async (page, url, retryCount = 0) => {
@@ -89,11 +146,57 @@ const extractJobDetails = async (page, url, retryCount = 0) => {
   }
 };
 
+const formatJobToText = (jobData) => {
+  const lines = [];
+
+  lines.push('='.repeat(80));
+  lines.push('JOB DETAILS');
+  lines.push('='.repeat(80));
+  lines.push('');
+
+  lines.push(`TITLE: ${jobData.title || 'N/A'}`);
+  lines.push('');
+
+  lines.push(`LOCATION: ${jobData.location || 'N/A'}`);
+  lines.push('');
+
+  lines.push(`URL: ${jobData.url}`);
+  lines.push('');
+
+  if (jobData.skills && jobData.skills.length > 0) {
+    lines.push('SKILLS/REQUIREMENTS:');
+    jobData.skills.forEach(skill => {
+      lines.push(`  - ${skill}`);
+    });
+    lines.push('');
+  }
+
+  lines.push('-'.repeat(80));
+  lines.push('DESCRIPTION:');
+  lines.push('-'.repeat(80));
+  lines.push('');
+  lines.push(jobData.description || 'N/A');
+  lines.push('');
+
+  lines.push('='.repeat(80));
+
+  return lines.join('\n');
+};
+
+const saveJobToFile = (jobData, companyDir, jobNumber) => {
+  const fileName = `${jobNumber}.txt`;
+  const filePath = path.join(companyDir, fileName);
+  const content = formatJobToText(jobData);
+
+  fs.writeFileSync(filePath, content, 'utf-8');
+  return fileName;
+};
+
 const runStage3 = async () => {
   log.info('Starting Stage 3: Job Details Extractor...');
 
   const inputFile = path.join(config.output.dir, 'job_links.csv');
-  const outputFile = path.join(config.output.dir, 'jobs_data.csv');
+  const jobsDir = path.join(config.output.dir, 'jobs');
 
   const jobURLs = readCSV(inputFile, 'url');
   if (jobURLs.length === 0) {
@@ -101,15 +204,19 @@ const runStage3 = async () => {
     return;
   }
 
-  const existingJobURLs = readCSV(outputFile, 'url').map(normalizeURL);
-  const existingSet = new Set(existingJobURLs);
+  if (!fs.existsSync(jobsDir)) {
+    fs.mkdirSync(jobsDir, { recursive: true });
+  }
 
-  const urlsToProcess = jobURLs.filter(url => !existingSet.has(normalizeURL(url)));
+  const processedJobs = getProcessedJobs(jobsDir);
+  const urlsToProcess = jobURLs.filter(url => !processedJobs.has(normalizeURL(url)));
 
   if (urlsToProcess.length === 0) {
     log.info('Stage 3 complete: All jobs already processed');
     return;
   }
+
+  log.info(`Found ${urlsToProcess.length} new jobs to process`);
 
   const browser = await puppeteer.launch({
     headless: config.crawler.headless,
@@ -117,8 +224,9 @@ const runStage3 = async () => {
   });
 
   const limit = pLimit(config.crawler.concurrency);
-  const newJobs = [];
-  let failedJobs = 0;
+  let successCount = 0;
+  let failedCount = 0;
+  const companyJobCounts = {};
 
   const processJobURL = async (url, index) => {
     log.progress(`Processing job ${index + 1}/${urlsToProcess.length}: ${url}`);
@@ -129,10 +237,25 @@ const runStage3 = async () => {
       await page.setViewport({ width: 1920, height: 1080 });
 
       const jobData = await extractJobDetails(page, url);
-      newJobs.push(jobData);
+      const companyName = extractCompanyName(url);
+      const companyDir = path.join(jobsDir, companyName);
+
+      if (!fs.existsSync(companyDir)) {
+        fs.mkdirSync(companyDir, { recursive: true });
+      }
+
+      const jobNumber = getNextJobNumber(companyDir);
+      const fileName = saveJobToFile(jobData, companyDir, jobNumber);
+
+      markJobAsProcessed(jobsDir, url);
+
+      companyJobCounts[companyName] = (companyJobCounts[companyName] || 0) + 1;
+      successCount++;
+
+      log.info(`Saved: ${companyName}/${fileName}`);
     } catch (error) {
       log.error(`Failed to extract job details from ${url}: ${error.message}`);
-      failedJobs++;
+      failedCount++;
     } finally {
       await page.close();
     }
@@ -142,14 +265,15 @@ const runStage3 = async () => {
 
   await browser.close();
 
-  if (newJobs.length > 0) {
-    writeCSV(outputFile, newJobs, ['url', 'title', 'description', 'location', 'skills']);
-    log.success(`Stage 3 complete: ${newJobs.length} new jobs saved to ${outputFile}`);
-  } else {
-    log.info('Stage 3 complete: No new jobs extracted');
-  }
+  log.success(`Stage 3 complete: ${successCount} jobs saved to ${jobsDir}`);
+  log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${successCount}, Failed: ${failedCount}`);
 
-  log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${newJobs.length}, Failed: ${failedJobs}`);
+  if (Object.keys(companyJobCounts).length > 0) {
+    log.info('Jobs saved by company:');
+    Object.entries(companyJobCounts).sort().forEach(([company, count]) => {
+      log.info(`  ${company}: ${count} jobs`);
+    });
+  }
 };
 
 module.exports = runStage3;
