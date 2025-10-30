@@ -696,9 +696,6 @@ const extractJobDetails = async (page, url) => {
         };
       } else {
         failureReasons.push(`Structured data validation failed: ${validation.reason}`);
-        console.log('[DEBUG] Structured data extracted but failed validation:', validation.reason);
-        console.log('[DEBUG] Title:', structuredData.title?.substring(0, 50));
-        console.log('[DEBUG] Description length:', structuredData.description?.length);
       }
     } else {
       failureReasons.push('No structured data found');
