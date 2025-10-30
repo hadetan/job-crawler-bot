@@ -235,9 +235,30 @@ const extractWithIntelligentAnalysis = async (page) => {
 
     // Step 2: Extract title intelligently
     const title = await page.evaluate(() => {
-      const headings = Array.from(document.querySelectorAll('h1, h2'));
+      // Priority 1: Check page metadata (most reliable)
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      if (ogTitle && ogTitle.content) {
+        const text = ogTitle.content.trim();
+        // Remove common suffixes like "- Company Name"
+        const cleaned = text.split(' - ')[0].split(' | ')[0].trim();
+        if (cleaned.length >= 5 && cleaned.length <= 200) {
+          return cleaned;
+        }
+      }
 
-      // Exclusion patterns for common page headings
+      // Priority 2: Check document.title
+      const docTitle = document.title.trim();
+      if (docTitle && !docTitle.toLowerCase().includes('careers') && !docTitle.toLowerCase().includes('jobs')) {
+        const cleaned = docTitle.split(' - ')[0].split(' | ')[0].trim();
+        if (cleaned.length >= 5 && cleaned.length <= 200) {
+          return cleaned;
+        }
+      }
+
+      // Priority 3: Look for headings with specific job title indicators
+      const headings = Array.from(document.querySelectorAll('h1, h2, h3'));
+
+      // Exclusion patterns for section headings (NOT job titles)
       const exclusionPatterns = [
         /current openings/i,
         /open roles/i,
@@ -246,7 +267,14 @@ const extractWithIntelligentAnalysis = async (page) => {
         /^about/i,
         /^home$/i,
         /^careers$/i,
-        /^jobs$/i
+        /^jobs$/i,
+        /what we're looking for/i,
+        /what you'll do/i,
+        /who you are/i,
+        /your role/i,
+        /responsibilities/i,
+        /requirements/i,
+        /qualifications/i
       ];
 
       let bestHeading = null;
@@ -258,7 +286,7 @@ const extractWithIntelligentAnalysis = async (page) => {
         // Skip if too short or too long
         if (text.length < 5 || text.length > 200) continue;
 
-        // Skip if matches exclusion patterns
+        // Skip if matches exclusion patterns (section headings)
         if (exclusionPatterns.some(pattern => pattern.test(text))) continue;
 
         // Skip if in navigation
@@ -279,7 +307,10 @@ const extractWithIntelligentAnalysis = async (page) => {
         const position = rect.top;
         const positionWeight = Math.max(1, 3 - (position / 500)); // Higher weight for top positions
 
-        const score = fontSize * positionWeight;
+        // Boost score if h1 (most likely job title)
+        const tagBoost = heading.tagName === 'H1' ? 1.5 : 1.0;
+
+        const score = fontSize * positionWeight * tagBoost;
 
         if (score > bestScore) {
           bestScore = score;
@@ -289,7 +320,7 @@ const extractWithIntelligentAnalysis = async (page) => {
 
       // Fallback: Look for semantic attributes
       if (!bestHeading) {
-        const semanticElements = document.querySelectorAll('[data-qa*="job"], [data-qa*="title"], [aria-label*="job"], [aria-label*="title"]');
+        const semanticElements = document.querySelectorAll('[data-qa*="job-title"], [data-qa*="position"], [aria-label*="job title"]');
         for (const el of semanticElements) {
           const text = el.textContent.trim();
           if (text.length >= 5 && text.length <= 200) {
