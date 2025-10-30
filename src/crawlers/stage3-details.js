@@ -187,6 +187,268 @@ const extractFromStructuredData = async (page) => {
   }
 };
 
+// Extract job data using intelligent DOM analysis
+const extractWithIntelligentAnalysis = async (page) => {
+  try {
+    // Step 1: Detect error pages
+    const isErrorPage = await page.evaluate(() => {
+      const pageTitle = document.title.toLowerCase();
+      const bodyText = document.body.textContent.toLowerCase();
+
+      // Check for 404 patterns
+      if (pageTitle.includes('404') || pageTitle.includes('not found') || pageTitle.includes('error')) {
+        return true;
+      }
+
+      // Check for error messages in content
+      const errorPatterns = [
+        "couldn't find",
+        "page not found",
+        "job posting.*closed",
+        "posting.*removed",
+        "sorry.*nothing"
+      ];
+
+      for (const pattern of errorPatterns) {
+        const regex = new RegExp(pattern, 'i');
+        if (regex.test(bodyText)) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+
+    if (isErrorPage) {
+      return null;
+    }
+
+    // Step 2: Extract title intelligently
+    const title = await page.evaluate(() => {
+      const headings = Array.from(document.querySelectorAll('h1, h2'));
+
+      // Exclusion patterns for common page headings
+      const exclusionPatterns = [
+        /current openings/i,
+        /open roles/i,
+        /careers at/i,
+        /^join/i,
+        /^about/i,
+        /^home$/i,
+        /^careers$/i,
+        /^jobs$/i
+      ];
+
+      let bestHeading = null;
+      let bestScore = 0;
+
+      for (const heading of headings) {
+        const text = heading.textContent.trim();
+
+        // Skip if too short or too long
+        if (text.length < 5 || text.length > 200) continue;
+
+        // Skip if matches exclusion patterns
+        if (exclusionPatterns.some(pattern => pattern.test(text))) continue;
+
+        // Skip if in navigation
+        let parent = heading.parentElement;
+        let inNav = false;
+        for (let i = 0; i < 5 && parent; i++) {
+          if (parent.tagName === 'NAV' || parent.getAttribute('role') === 'navigation') {
+            inNav = true;
+            break;
+          }
+          parent = parent.parentElement;
+        }
+        if (inNav) continue;
+
+        // Calculate prominence score
+        const rect = heading.getBoundingClientRect();
+        const fontSize = parseInt(window.getComputedStyle(heading).fontSize) || 16;
+        const position = rect.top;
+        const positionWeight = Math.max(1, 3 - (position / 500)); // Higher weight for top positions
+
+        const score = fontSize * positionWeight;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestHeading = text;
+        }
+      }
+
+      // Fallback: Look for semantic attributes
+      if (!bestHeading) {
+        const semanticElements = document.querySelectorAll('[data-qa*="job"], [data-qa*="title"], [aria-label*="job"], [aria-label*="title"]');
+        for (const el of semanticElements) {
+          const text = el.textContent.trim();
+          if (text.length >= 5 && text.length <= 200) {
+            bestHeading = text;
+            break;
+          }
+        }
+      }
+
+      return bestHeading || '';
+    });
+
+    // Step 3: Extract description intelligently
+    const description = await page.evaluate(() => {
+      const containers = Array.from(document.querySelectorAll('article, main, [role="main"], div'));
+
+      // Job-related keywords to boost score
+      const jobKeywords = ['responsibilities', 'requirements', 'qualifications', 'description', 'about the role', 'what you'];
+
+      let bestContainers = [];
+      let maxScore = 0;
+
+      for (const container of containers) {
+        // Skip if in navigation or footer
+        const rect = container.getBoundingClientRect();
+        const windowHeight = window.innerHeight;
+
+        // Skip top navigation (first 100px)
+        if (rect.top < 100 && rect.height < 200) continue;
+
+        // Skip footer (bottom 20% of page)
+        if (rect.top > windowHeight * 0.8) continue;
+
+        // Skip narrow containers (likely sidebars)
+        if (rect.width < 300) continue;
+
+        // Get text content
+        const text = container.textContent || '';
+        const textLength = text.trim().length;
+
+        // Skip if too short
+        if (textLength < 200) continue;
+
+        // Calculate text density (text per element)
+        const childCount = container.querySelectorAll('*').length || 1;
+        const textDensity = textLength / childCount;
+
+        // Calculate link ratio (high link ratio = navigation, skip)
+        const links = container.querySelectorAll('a');
+        const linkText = Array.from(links).reduce((sum, link) => sum + (link.textContent || '').length, 0);
+        const linkRatio = textLength > 0 ? linkText / textLength : 0;
+
+        if (linkRatio > 0.5) continue; // Too many links, likely navigation
+
+        // Check for job-related keywords
+        const lowerText = text.toLowerCase();
+        const keywordCount = jobKeywords.filter(kw => lowerText.includes(kw)).length;
+
+        // Calculate quality score
+        const score = textDensity * (1 + keywordCount * 0.5);
+
+        if (score > maxScore * 0.7) { // Keep containers within 70% of max score
+          if (score > maxScore) {
+            maxScore = score;
+          }
+          bestContainers.push({ container, score });
+        }
+      }
+
+      // Sort by score and take top containers
+      bestContainers.sort((a, b) => b.score - a.score);
+      const topContainers = bestContainers.slice(0, 3).map(c => c.container);
+
+      // Extract HTML from selected containers
+      let combinedHTML = '';
+      for (const container of topContainers) {
+        combinedHTML += container.innerHTML + '\n\n';
+      }
+
+      return combinedHTML;
+    });
+
+    // Convert HTML to text
+    const descriptionText = description ? convert(description, {
+      wordwrap: 130,
+      preserveNewlines: true,
+      selectors: [
+        { selector: 'a', options: { ignoreHref: true } },
+        { selector: 'img', format: 'skip' }
+      ]
+    }).trim() : '';
+
+    // Step 4: Extract location
+    const location = await page.evaluate(() => {
+      // Look for location patterns
+      const patterns = [
+        /location:\s*([^<\n]+)/i,
+        /based in:\s*([^<\n]+)/i,
+        /office:\s*([^<\n]+)/i
+      ];
+
+      const bodyText = document.body.textContent;
+
+      for (const pattern of patterns) {
+        const match = bodyText.match(pattern);
+        if (match && match[1]) {
+          const loc = match[1].trim();
+          if (loc.length >= 2 && loc.length <= 100) {
+            return loc;
+          }
+        }
+      }
+
+      // Look for semantic elements
+      const locationElements = document.querySelectorAll('[itemprop="jobLocation"], [data-location], .location, [class*="location"]');
+      for (const el of locationElements) {
+        const text = el.textContent.trim();
+        if (text.length >= 2 && text.length <= 100) {
+          return text;
+        }
+      }
+
+      return 'Not specified';
+    });
+
+    // Step 5: Extract skills/requirements
+    const skills = await page.evaluate(() => {
+      // Find all lists in the main content area
+      const lists = Array.from(document.querySelectorAll('ul, ol'));
+      const skillItems = [];
+
+      for (const list of lists) {
+        // Check if list is in navigation/footer
+        let parent = list.parentElement;
+        let inNavOrFooter = false;
+        for (let i = 0; i < 5 && parent; i++) {
+          const role = parent.getAttribute('role');
+          if (parent.tagName === 'NAV' || role === 'navigation' || parent.tagName === 'FOOTER') {
+            inNavOrFooter = true;
+            break;
+          }
+          parent = parent.parentElement;
+        }
+        if (inNavOrFooter) continue;
+
+        // Check if parent section has relevant heading
+        const items = Array.from(list.querySelectorAll('li'));
+        for (const item of items) {
+          const text = item.textContent.trim();
+          if (text.length >= 10 && text.length <= 500) {
+            skillItems.push(text);
+          }
+        }
+      }
+
+      return skillItems;
+    });
+
+    return {
+      title: title.trim(),
+      description: descriptionText,
+      location: location.trim(),
+      skills
+    };
+  } catch (error) {
+    return null;
+  }
+};
+
 const extractJobDetails = async (page, url, retryCount = 0) => {
   try {
     await page.goto(url, {
