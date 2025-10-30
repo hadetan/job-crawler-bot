@@ -707,12 +707,28 @@ const runStage3 = async () => {
       markJobAsProcessed(jobsDir, url);
 
       companyJobCounts[companyName] = (companyJobCounts[companyName] || 0) + 1;
-      boardTypeStats[boardType]++;
       successCount++;
 
+      // Track extraction method
+      if (jobData.source === 'structured-data') structuredCount++;
+      if (jobData.source === 'intelligent-analysis') intelligentCount++;
+
+      log.info(`Extracted via ${jobData.source}`);
       log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
     } catch (error) {
-      log.error(`Failed to extract job details from ${url}: ${error.message}`);
+      // More detailed error logging
+      if (error.message.includes('Failed to extract valid content')) {
+        log.error(`Validation failed for ${url}: ${error.message}`);
+      } else if (error.message.includes('Navigation') || error.message.includes('Timeout')) {
+        log.error(`Navigation timeout for ${url}: ${error.message}`);
+      } else {
+        log.error(`Extraction failed for ${url}: ${error.message}`);
+      }
+
+      // Save failed URL to separate file for analysis
+      const failedLogPath = path.join(jobsDir, 'failed_extractions.txt');
+      fs.appendFileSync(failedLogPath, `${url}\t${error.message}\n`, 'utf-8');
+
       failedCount++;
     } finally {
       await page.close();
