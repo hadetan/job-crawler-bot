@@ -418,8 +418,8 @@ const saveJobToFile = (jobData, companyDir, jobNumber) => {
 const runStage3 = async () => {
   log.info('Starting Stage 3: Job Details Extractor...');
 
-  const inputFile = path.join(config.output.dir, 'job_links_test.csv');
-  const jobsDir = path.join(config.output.dir, 'jobs_test');
+  const inputFile = path.join(config.output.dir, 'job_links.csv');
+  const jobsDir = path.join(config.output.dir, 'jobs');
 
   const jobURLs = readCSV(inputFile, 'url');
   if (jobURLs.length === 0) {
