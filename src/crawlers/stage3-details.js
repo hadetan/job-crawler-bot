@@ -138,25 +138,22 @@ const extractFromStructuredData = async (page) => {
         // Description might be HTML with encoded entities, need to decode and convert to text
         let description = data.description || '';
         if (description && description.length > 0) {
-          // Decode HTML entities AND extract text in browser
-          description = await page.evaluate((desc) => {
-            // Method 1: Use textarea to decode HTML entities first
+          // Decode HTML entities in browser first
+          const decodedHtml = await page.evaluate((desc) => {
             const textarea = document.createElement('textarea');
             textarea.innerHTML = desc;
-            let decodedHtml = textarea.value;
-
-            // Method 2: Parse the decoded HTML and extract text
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = decodedHtml;
-
-            // Get text content, which strips ALL HTML tags
-            let text = tempDiv.textContent || tempDiv.innerText || '';
-
-            // Clean up whitespace
-            text = text.replace(/\s+/g, ' ').trim();
-
-            return text;
+            return textarea.value;
           }, description);
+
+          // Then use html-to-text library to convert to clean text (handles all HTML properly)
+          description = convert(decodedHtml, {
+            wordwrap: 130,
+            preserveNewlines: true,
+            selectors: [
+              { selector: 'a', options: { ignoreHref: true } },
+              { selector: 'img', format: 'skip' }
+            ]
+          }).trim();
         }
 
         // Extract location (can be nested)
