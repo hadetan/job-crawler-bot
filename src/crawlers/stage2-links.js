@@ -64,6 +64,14 @@ const extractJobId = (url) => {
   }
 };
 
+/**
+ * Check if URL is a job detail page (not a generic careers/benefits/culture page)
+ * @param {string} url - The URL to check
+ * @returns {boolean} - True if URL is a job detail page with numeric job ID
+ *
+ * A job detail page MUST have a 4+ digit numeric job ID.
+ * Generic pages like /benefits, /culture, /life-at-company are filtered out.
+ */
 const isJobDetailPage = (url) => {
   try {
     const urlObj = new URL(url);
@@ -95,17 +103,10 @@ const isJobDetailPage = (url) => {
       }
     }
 
-    // Job detail pages typically have job IDs (numbers/alphanumeric) in URL
-    const hasJobId = /\d{7,}/.test(pathname + search) ||  // Long numbers (Greenhouse IDs)
-                     /gh_jid=/.test(search) ||            // Greenhouse job ID param
-                     /\/jobs?\/[a-zA-Z0-9-]+/.test(pathname) ||  // /job/some-job-title-123
-                     /job[-_]?id=/i.test(search);         // job_id or jobId param
-
-    // Must have job ID or be deep enough path (3+ segments after domain)
-    const pathSegments = pathname.split('/').filter(Boolean);
-    const isDeepPath = pathSegments.length >= 3;
-
-    return hasJobId || isDeepPath;
+    // Strict check: Must have a 4+ digit numeric job ID
+    // This filters out generic pages like /benefits, /culture, /life-at-stripe
+    const jobId = extractJobId(url);
+    return jobId !== null;
   } catch {
     return false;
   }
