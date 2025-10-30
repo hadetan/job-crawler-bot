@@ -138,10 +138,16 @@ const extractFromStructuredData = async (page) => {
         // Description might be HTML with encoded entities, need to decode and convert to text
         let description = data.description || '';
         if (description && description.length > 0) {
-          // Decode HTML entities AND extract text in browser (one step)
+          // Decode HTML entities AND extract text in browser
           description = await page.evaluate((desc) => {
+            // Method 1: Use textarea to decode HTML entities first
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = desc;
+            let decodedHtml = textarea.value;
+
+            // Method 2: Parse the decoded HTML and extract text
             const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = desc; // Decodes entities and parses HTML
+            tempDiv.innerHTML = decodedHtml;
 
             // Get text content, which strips ALL HTML tags
             let text = tempDiv.textContent || tempDiv.innerText || '';
