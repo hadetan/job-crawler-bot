@@ -31,7 +31,10 @@ const isJobDetailPage = (url) => {
       /\/careers\/?$/,           // Ends with /careers/ or /careers
       /\/jobs\/?$/,              // Ends with /jobs/ or /jobs
       /\/career\/?$/,            // Ends with /career/ or /career
-      /\/(faq|about|team|benefits|culture|life|perks|diversity|contact)[\/?]/,
+      /\/(faqs?|about|team|benefits|culture|life|perks|diversity|contact|early-careers)[\/?]/,
+      /life-as/,                 // Blog/life stories pages
+      /our-entrepreneurs/,       // Team/entrepreneur pages
+      /episodes\//,              // Blog episodes
       /#job-board/,              // Hash fragments to job boards
       /open-positions\/?$/,      // Generic "open positions" page
       /\/[a-z]{2}\/.*careers\/?$/ // Localized pages ending in careers (e.g., /pt/careers/)
