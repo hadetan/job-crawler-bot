@@ -20,6 +20,58 @@ const isValidJobURL = (url) => {
   }
 };
 
+/**
+ * Extract numeric job ID (4+ digits) from URL
+ * @param {string} url - The URL to extract job ID from
+ * @returns {string|null} - Job ID as string, or null if not found
+ *
+ * Searches entire URL for sequences of 4+ consecutive digits.
+ * If multiple matches found, returns the longest one (most likely the job ID).
+ * If same length, returns the last one.
+ *
+ * Examples:
+ * - https://careers.roblox.com/jobs/7179133 → "7179133"
+ * - https://stripe.com/us/jobs/listing/engineer/7176975 → "7176975"
+ * - https://example.com/job?gh_jid=7220394 → "7220394"
+ * - https://stripe.com/jobs/benefits → null
+ */
+const extractJobId = (url) => {
+  if (!url) return null;
+
+  try {
+    // Find all sequences of 4+ consecutive digits in the entire URL
+    const matches = url.match(/\d{4,}/g);
+
+    if (!matches || matches.length === 0) {
+      return null;
+    }
+
+    // If multiple matches, return the longest one (most likely the job ID)
+    // If same length, return the last one (typically appears later in URL path)
+    const longestMatch = matches.reduce((longest, current) => {
+      if (current.length > longest.length) {
+        return current;
+      } else if (current.length === longest.length) {
+        // Same length: prefer the later one (return current)
+        return current;
+      }
+      return longest;
+    });
+
+    return longestMatch;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Check if URL is a job detail page (not a generic careers/benefits/culture page)
+ * @param {string} url - The URL to check
+ * @returns {boolean} - True if URL is a job detail page with numeric job ID
+ *
+ * A job detail page MUST have a 4+ digit numeric job ID.
+ * Generic pages like /benefits, /culture, /life-at-company are filtered out.
+ */
 const isJobDetailPage = (url) => {
   try {
     const urlObj = new URL(url);
@@ -51,17 +103,10 @@ const isJobDetailPage = (url) => {
       }
     }
 
-    // Job detail pages typically have job IDs (numbers/alphanumeric) in URL
-    const hasJobId = /\d{7,}/.test(pathname + search) ||  // Long numbers (Greenhouse IDs)
-                     /gh_jid=/.test(search) ||            // Greenhouse job ID param
-                     /\/jobs?\/[a-zA-Z0-9-]+/.test(pathname) ||  // /job/some-job-title-123
-                     /job[-_]?id=/i.test(search);         // job_id or jobId param
-
-    // Must have job ID or be deep enough path (3+ segments after domain)
-    const pathSegments = pathname.split('/').filter(Boolean);
-    const isDeepPath = pathSegments.length >= 3;
-
-    return hasJobId || isDeepPath;
+    // Strict check: Must have a 4+ digit numeric job ID
+    // This filters out generic pages like /benefits, /culture, /life-at-stripe
+    const jobId = extractJobId(url);
+    return jobId !== null;
   } catch {
     return false;
   }
@@ -129,8 +174,8 @@ const extractJobLinks = async (page, url, retryCount = 0) => {
         }
       })
       .filter(Boolean)
-      .filter(isJobDetailPage)
-      .filter(link => !hasNonEnglishLocale(link));
+      .filter(isJobDetailPage);
+      // Locale deduplication is now handled by job ID-based normalizeURL()
 
     return validLinks;
   } catch (error) {
