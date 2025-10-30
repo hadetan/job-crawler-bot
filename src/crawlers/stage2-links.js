@@ -67,6 +67,35 @@ const isJobDetailPage = (url) => {
   }
 };
 
+const hasNonEnglishLocale = (url) => {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+
+    // Non-English language codes to filter out
+    const nonEnglishLanguages = [
+      'fr', 'de', 'es', 'it', 'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'sv',
+      'zh', 'ar', 'id', 'th', 'vi', 'tr', 'da', 'fi', 'no', 'cs', 'hu',
+      'ro', 'bg', 'hr', 'sk', 'sl', 'lt', 'lv', 'et', 'el', 'he', 'hi'
+    ];
+
+    // Check for locale patterns at start of path:
+    // /fr/, /de/, /fr-ca/, /es-mx/, /de-ch/, /zh-cn/, /pt-br/, etc.
+    // Pattern: /[2-letter-code]/ or /[2-letter-code]-[2-letter-code]/
+    const localePattern = /^\/([a-z]{2})(?:-[a-z]{2})?\//;
+    const match = pathname.match(localePattern);
+
+    if (match) {
+      const languageCode = match[1]; // Extract the language part (e.g., 'fr' from '/fr-ca/')
+      return nonEnglishLanguages.includes(languageCode);
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+};
+
 const extractJobLinks = async (page, url, retryCount = 0) => {
   try {
     await page.goto(url, {
