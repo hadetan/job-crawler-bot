@@ -741,7 +741,7 @@ const runStage3 = async () => {
 
   log.success(`Stage 3 complete: ${successCount} jobs saved to ${jobsDir}`);
   log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${successCount}, Failed: ${failedCount}`);
-  log.info(`Board types - Greenhouse: ${boardTypeStats.greenhouse}, Lever: ${boardTypeStats.lever}, Generic: ${boardTypeStats.generic}`);
+  log.info(`Extraction methods - Structured Data: ${structuredCount}, Intelligent Analysis: ${intelligentCount}`);
 
   if (Object.keys(companyJobCounts).length > 0) {
     log.info('Jobs saved by company:');
