@@ -2,600 +2,218 @@ const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
 const pLimit = require('p-limit');
-const { convert } = require('html-to-text');
 const config = require('../config');
-const { readCSV, normalizeURL } = require('../utils/csv-handler');
-const log = require('../utils/logger');
+const {
+  readCSV,
+  normalizeURL,
+  log,
+  extractCompanyName,
+  getProcessedJobs,
+  markJobAsProcessed,
+  getNextJobNumber,
+  saveJobToFile
+} = require('../utils');
+const {
+  extractFromStructuredData,
+  extractWithIntelligentAnalysis
+} = require('../extractors');
+const { validateExtractedContent } = require('../validators');
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-const extractCompanyName = (url) => {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.replace(/^www\./, '');
-
-    if (hostname.includes('greenhouse.io')) {
-      const pathParts = urlObj.pathname.split('/').filter(Boolean);
-      if (pathParts.length > 0) {
-        return pathParts[0];
-      }
-    }
-
-    const domainParts = hostname.split('.');
-    if (domainParts.length >= 2) {
-      return domainParts[domainParts.length - 2];
-    }
-
-    return hostname.replace(/\./g, '_');
-  } catch {
-    return 'unknown';
-  }
-};
-
-const detectCompany = (url) => {
-  const urlLower = url.toLowerCase();
-  if (urlLower.includes('bigid.com')) return 'bigid';
-  if (urlLower.includes('eyecarecenter.com')) return 'eyecarecenter';
-  if (urlLower.includes('lob.com')) return 'lob';
-  if (urlLower.includes('elixirr.com')) return 'elixirr';
-  return 'generic';
-};
-
-const detectJobBoardType = (url) => {
-  if (url.includes('gh_jid=') || url.includes('greenhouse.io')) {
-    return 'greenhouse';
-  }
-  if (url.includes('lob.com/careers/job')) {
-    return 'lever';
-  }
-  return 'generic';
-};
-
-const getProcessedJobs = (jobsDir) => {
-  const trackingFile = path.join(jobsDir, '.processed_urls.txt');
-  if (!fs.existsSync(trackingFile)) {
-    return new Set();
-  }
-  const content = fs.readFileSync(trackingFile, 'utf-8');
-  return new Set(content.split('\n').filter(Boolean).map(normalizeURL));
-};
-
-const markJobAsProcessed = (jobsDir, url) => {
-  const trackingFile = path.join(jobsDir, '.processed_urls.txt');
-  fs.appendFileSync(trackingFile, url + '\n', 'utf-8');
-};
-
-const getNextJobNumber = (companyDir) => {
-  if (!fs.existsSync(companyDir)) {
-    return 1;
-  }
-
-  const files = fs.readdirSync(companyDir)
-    .filter(f => f.match(/^\d+\.txt$/))
-    .map(f => parseInt(f.replace('.txt', '')))
-    .filter(n => !isNaN(n));
-
-  if (files.length === 0) {
-    return 1;
-  }
-
-  return Math.max(...files) + 1;
-};
-
-const tryExtractText = async (page, selectors) => {
-  for (const selector of selectors) {
-    try {
-      const element = await page.$(selector);
-      if (element) {
-        const text = await page.evaluate(el => el.textContent || el.innerText, element);
-        if (text && text.trim()) {
-          return text.trim();
-        }
-      }
-    } catch (error) {
-      // Continue to next selector
-    }
-  }
-  return '';
-};
-
-const tryExtractHTML = async (page, selectors) => {
-  for (const selector of selectors) {
-    try {
-      const element = await page.$(selector);
-      if (element) {
-        const html = await page.evaluate(el => el.innerHTML, element);
-        if (html && html.trim()) {
-          const text = convert(html, {
-            wordwrap: 130,
-            preserveNewlines: true,
-            selectors: [
-              { selector: 'a', options: { ignoreHref: true } },
-              { selector: 'img', format: 'skip' }
-            ]
-          });
-          return text.trim();
-        }
-      }
-    } catch (error) {
-      // Continue to next selector
-    }
-  }
-  return '';
-};
-
-const tryExtractList = async (page, selectors) => {
-  for (const selector of selectors) {
-    try {
-      const elements = await page.$$(selector);
-      if (elements.length > 0) {
-        const items = [];
-        for (const element of elements) {
-          const text = await page.evaluate(el => el.textContent || el.innerText, element);
-          if (text && text.trim() && text.length > 10 && text.length < 300) {
-            items.push(text.trim());
-          }
-        }
-        if (items.length > 0) {
-          return items;
-        }
-      }
-    } catch (error) {
-      // Continue to next selector
-    }
-  }
-  return [];
-};
-
-// Greenhouse-specific extraction (most common)
-const extractGreenhouseJob = async (page) => {
-  const titleSelectors = [
-    '.app-title',
-    'h1.app-title',
-    '[data-qa="job-title"]',
-    'h1'
-  ];
-
-  const descriptionSelectors = [
-    '#content',
-    '.content',
-    '#app-body',
-    '.app-body',
-    '[data-qa="job-description"]'
-  ];
-
-  const locationSelectors = [
-    '.location',
-    '.app-location',
-    '[data-qa="job-location"]',
-    '.posting-categories .location'
-  ];
-
-  const requirementsSelectors = [
-    '#content ul li',
-    '.content ul li',
-    '#app-body ul li',
-    '[data-qa="job-description"] ul li'
-  ];
-
-  const title = await tryExtractText(page, titleSelectors);
-  const description = await tryExtractHTML(page, descriptionSelectors);
-  const location = await tryExtractText(page, locationSelectors);
-  const skills = await tryExtractList(page, requirementsSelectors);
-
-  return {
-    title: title || 'N/A',
-    description: description || 'No description found',
-    location: location || 'Not specified',
-    skills
-  };
-};
-
-// Lever-specific extraction
-const extractLeverJob = async (page) => {
-  const titleSelectors = [
-    '.posting-headline h2',
-    'h2[data-qa="posting-name"]',
-    '.posting-header h2',
-    'h2'
-  ];
-
-  const descriptionSelectors = [
-    '.posting-description .content',
-    '.section-wrapper .content',
-    '.posting-description',
-    '.content.description'
-  ];
-
-  const locationSelectors = [
-    '.posting-categories .location',
-    '.posting-categories .sort-by-location',
-    '[data-qa="posting-location"]',
-    '.location'
-  ];
-
-  const requirementsSelectors = [
-    '.posting-description ul li',
-    '.content.description ul li',
-    '.section-wrapper ul li'
-  ];
-
-  const title = await tryExtractText(page, titleSelectors);
-  const description = await tryExtractHTML(page, descriptionSelectors);
-  const location = await tryExtractText(page, locationSelectors);
-  const skills = await tryExtractList(page, requirementsSelectors);
-
-  return {
-    title: title || 'N/A',
-    description: description || 'No description found',
-    location: location || 'Not specified',
-    skills
-  };
-};
-
-// EyeCareCenter-specific extraction (uses CSS Modules)
-const extractEyeCareCenterJob = async (page) => {
-  const titleSelectors = [
-    'h1',
-    '[class*="job"] h1',
-    '[class*="title"]'
-  ];
-
-  const descriptionSelectors = [
-    '[class*="job_detail_content"]',
-    '[class*="job_content"]',
-    '[class*="description"]',
-    'main',
-    'article'
-  ];
-
-  const locationSelectors = [
-    '[class*="location"]',
-    '.location'
-  ];
-
-  const requirementsSelectors = [
-    '[class*="job_detail_content"] ul li',
-    '[class*="job_content"] ul li',
-    'main ul li',
-    'article ul li'
-  ];
-
-  const title = await tryExtractText(page, titleSelectors);
-  const description = await tryExtractHTML(page, descriptionSelectors);
-  let location = await tryExtractText(page, locationSelectors);
-
-  // EyeCareCenter embeds location in title, extract it
-  if (!location && title) {
-    const locationMatch = title.match(/in (.+?)$/);
-    if (locationMatch) {
-      location = locationMatch[1];
-    }
-  }
-
-  const skills = await tryExtractList(page, requirementsSelectors);
-
-  return {
-    title: title || 'N/A',
-    description: description || 'No description found',
-    location: location || 'Not specified',
-    skills
-  };
-};
-
-// BigID-specific extraction (Greenhouse embed, needs extra wait time)
-const extractBigIDJob = async (page) => {
-  // Wait longer for Greenhouse embed to load
-  await page.waitForTimeout(4000);
-
-  const titleSelectors = [
-    '#grnhse_app .app-title',
-    '#grnhse_app h1',
-    '.app-title',
-    'h1',
-    'h2' // Last resort fallback
-  ];
-
-  const descriptionSelectors = [
-    '#grnhse_app #content',
-    '#grnhse_app .content',
-    '#content',
-    '.content',
-    'main'
-  ];
-
-  const locationSelectors = [
-    '#grnhse_app .location',
-    '.location',
-    '[class*="location"]'
-  ];
-
-  const requirementsSelectors = [
-    '#grnhse_app #content ul li',
-    '#grnhse_app .content ul li',
-    '#content ul li',
-    'main ul li'
-  ];
-
-  const title = await tryExtractText(page, titleSelectors);
-  const description = await tryExtractHTML(page, descriptionSelectors);
-  const location = await tryExtractText(page, locationSelectors);
-  const skills = await tryExtractList(page, requirementsSelectors);
-
-  return {
-    title: title || 'N/A',
-    description: description || 'No description found',
-    location: location || 'Not specified',
-    skills
-  };
-};
-
-// Lob-specific extraction (custom Lever implementation)
-const extractLobJob = async (page) => {
-  const titleSelectors = [
-    'h1',
-    '.job-title',
-    '[class*="title"]'
-  ];
-
-  const descriptionSelectors = [
-    '[class*="description"]',
-    '[class*="content"]',
-    'main',
-    'article'
-  ];
-
-  const locationSelectors = [
-    '[class*="location"]',
-    '.location'
-  ];
-
-  const requirementsSelectors = [
-    'main ul li',
-    'article ul li',
-    '[class*="description"] ul li'
-  ];
-
-  const title = await tryExtractText(page, titleSelectors);
-  const description = await tryExtractHTML(page, descriptionSelectors);
-  const location = await tryExtractText(page, locationSelectors);
-  const skills = await tryExtractList(page, requirementsSelectors);
-
-  return {
-    title: title || 'N/A',
-    description: description || 'No description found',
-    location: location || 'Not specified',
-    skills
-  };
-};
-
-// Generic fallback extraction
-const extractGenericJob = async (page) => {
-  const titleSelectors = [
-    'h1',
-    '[class*="title"]',
-    '[class*="job"]'
-  ];
-
-  const descriptionSelectors = [
-    'main',
-    'article',
-    '[role="main"]',
-    '.content'
-  ];
-
-  const locationSelectors = [
-    '.location',
-    '[class*="location"]'
-  ];
-
-  const requirementsSelectors = [
-    'main ul li',
-    'article ul li',
-    '.content ul li'
-  ];
-
-  const title = await tryExtractText(page, titleSelectors);
-  const description = await tryExtractHTML(page, descriptionSelectors);
-  const location = await tryExtractText(page, locationSelectors);
-  const skills = await tryExtractList(page, requirementsSelectors);
-
-  return {
-    title: title || 'N/A',
-    description: description || 'No description found',
-    location: location || 'Not specified',
-    skills
-  };
-};
-
-const extractJobDetails = async (page, url, retryCount = 0) => {
+/**
+ * Extract job details from a single URL using multi-layer extraction approach
+ * @param {Page} page - Puppeteer page object
+ * @param {string} url - Job posting URL
+ * @returns {Promise<Object>} Extracted job data with source information
+ */
+const extractJobDetails = async (page, url) => {
   try {
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: config.crawler.pageTimeout
     });
 
-    await page.waitForTimeout(2000);
+    // Wait longer for dynamic content to load
+    await page.waitForTimeout(3000);
 
-    // Prioritize company-specific extraction
-    const company = detectCompany(url);
-    let jobData;
+    const failureReasons = [];
 
-    switch (company) {
-      case 'bigid':
-        jobData = await extractBigIDJob(page);
-        break;
-      case 'eyecarecenter':
-        jobData = await extractEyeCareCenterJob(page);
-        break;
-      case 'lob':
-        jobData = await extractLobJob(page);
-        break;
-      case 'elixirr':
-        // Elixirr uses standard Greenhouse
-        jobData = await extractGreenhouseJob(page);
-        break;
-      default:
-        // Fall back to board type detection
-        const jobBoardType = detectJobBoardType(url);
-        switch (jobBoardType) {
-          case 'greenhouse':
-            jobData = await extractGreenhouseJob(page);
-            break;
-          case 'lever':
-            jobData = await extractLeverJob(page);
-            break;
-          default:
-            jobData = await extractGenericJob(page);
-        }
+    // Layer 1: Try structured data extraction (JSON-LD Schema.org)
+    const structuredData = await extractFromStructuredData(page);
+    if (structuredData) {
+      const validation = validateExtractedContent(structuredData);
+      if (validation.valid) {
+        return {
+          url,
+          ...structuredData,
+          source: 'structured-data'
+        };
+      } else {
+        failureReasons.push(`Structured data validation failed: ${validation.reason}`);
+      }
+    } else {
+      failureReasons.push('No structured data found');
     }
 
-    return {
-      url,
-      ...jobData
-    };
+    // Layer 2: Try intelligent DOM analysis
+    const intelligentData = await extractWithIntelligentAnalysis(page);
+    if (intelligentData) {
+      const validation = validateExtractedContent(intelligentData);
+
+      if (validation.valid) {
+        return {
+          url,
+          ...intelligentData,
+          source: 'intelligent-analysis'
+        };
+      } else {
+        failureReasons.push(`Intelligent analysis validation failed: ${validation.reason}`);
+      }
+    } else {
+      failureReasons.push('Intelligent analysis returned no data (likely error page)');
+    }
+
+    // Both layers failed
+    throw new Error(`Failed to extract valid content: ${failureReasons.join('; ')}`);
   } catch (error) {
-    if (retryCount < config.retry.maxRetries) {
-      const delay = config.retry.retryDelay * (retryCount + 1);
-      log.progress(`Failed to load ${url}, retrying in ${delay}ms... (Attempt ${retryCount + 1}/${config.retry.maxRetries})`);
-      await sleep(delay);
-      return extractJobDetails(page, url, retryCount + 1);
-    }
-
+    // Re-throw with original message for navigation/timeout errors
     throw error;
   }
 };
 
-const formatJobToText = (jobData) => {
-  const lines = [];
+/**
+ * Process a single job URL
+ * @param {Browser} browser - Puppeteer browser instance
+ * @param {string} url - Job URL to process
+ * @param {number} index - Index in processing queue
+ * @param {number} total - Total URLs to process
+ * @param {string} jobsDir - Output directory for jobs
+ * @param {Object} stats - Statistics object to update
+ * @returns {Promise<void>}
+ */
+const processJobURL = async (browser, url, index, total, jobsDir, stats) => {
+  log.progress(`Processing job ${index + 1}/${total}: ${url}`);
 
-  lines.push('='.repeat(80));
-  lines.push('JOB DETAILS');
-  lines.push('='.repeat(80));
-  lines.push('');
+  const page = await browser.newPage();
 
-  lines.push(`TITLE: ${jobData.title}`);
-  lines.push('');
+  try {
+    await page.setUserAgent(config.crawler.userAgent);
+    await page.setViewport({ width: 1920, height: 1080 });
 
-  lines.push(`LOCATION: ${jobData.location}`);
-  lines.push('');
+    const jobData = await extractJobDetails(page, url);
+    const companyName = extractCompanyName(url);
+    const companyDir = path.join(jobsDir, companyName);
 
-  lines.push(`URL: ${jobData.url}`);
-  lines.push('');
+    if (!fs.existsSync(companyDir)) {
+      fs.mkdirSync(companyDir, { recursive: true });
+    }
 
-  if (jobData.skills && jobData.skills.length > 0) {
-    lines.push('SKILLS/REQUIREMENTS:');
-    jobData.skills.forEach(skill => {
-      lines.push(`  - ${skill}`);
-    });
-    lines.push('');
+    const jobNumber = getNextJobNumber(companyDir);
+    const fileName = saveJobToFile(jobData, companyDir, jobNumber);
+
+    markJobAsProcessed(jobsDir, url);
+
+    stats.companyJobCounts[companyName] = (stats.companyJobCounts[companyName] || 0) + 1;
+    stats.successCount++;
+
+    // Track extraction method
+    if (jobData.source === 'structured-data') stats.structuredCount++;
+    if (jobData.source === 'intelligent-analysis') stats.intelligentCount++;
+
+    log.info(`Extracted via ${jobData.source}`);
+    log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
+  } catch (error) {
+    // Detailed error logging
+    if (error.message.includes('Failed to extract valid content')) {
+      log.error(`Validation failed for ${url}: ${error.message}`);
+    } else if (error.message.includes('Navigation') || error.message.includes('Timeout')) {
+      log.error(`Navigation timeout for ${url}: ${error.message}`);
+    } else {
+      log.error(`Extraction failed for ${url}: ${error.message}`);
+    }
+
+    // Save failed URL for analysis
+    const failedLogPath = path.join(jobsDir, 'failed_extractions.txt');
+    fs.appendFileSync(failedLogPath, `${url}\t${error.message}\n`, 'utf-8');
+
+    stats.failedCount++;
+  } finally {
+    await page.close();
   }
-
-  lines.push('-'.repeat(80));
-  lines.push('DESCRIPTION:');
-  lines.push('-'.repeat(80));
-  lines.push('');
-  lines.push(jobData.description);
-  lines.push('');
-
-  lines.push('='.repeat(80));
-
-  return lines.join('\n');
 };
 
-const saveJobToFile = (jobData, companyDir, jobNumber) => {
-  const fileName = `${jobNumber}.txt`;
-  const filePath = path.join(companyDir, fileName);
-  const content = formatJobToText(jobData);
-
-  fs.writeFileSync(filePath, content, 'utf-8');
-  return fileName;
-};
-
+/**
+ * Main function to run Stage 3: Job Details Extraction
+ * @returns {Promise<void>}
+ */
 const runStage3 = async () => {
   log.info('Starting Stage 3: Job Details Extractor...');
 
   const inputFile = path.join(config.output.dir, 'job_links.csv');
   const jobsDir = path.join(config.output.dir, 'jobs');
 
+  // Load job URLs from CSV
   const jobURLs = readCSV(inputFile, 'url');
   if (jobURLs.length === 0) {
     log.error('No job URLs found in job_links.csv. Run Stage 2 first.');
     return;
   }
 
+  // Ensure output directory exists
   if (!fs.existsSync(jobsDir)) {
     fs.mkdirSync(jobsDir, { recursive: true });
   }
 
+  // Filter out already processed jobs
   const processedJobs = getProcessedJobs(jobsDir);
-  const urlsToProcess = jobURLs.filter(url => !processedJobs.has(normalizeURL(url)));
+  let urlsToProcess = jobURLs.filter(url => !processedJobs.has(normalizeURL(url)));
 
   if (urlsToProcess.length === 0) {
     log.info('Stage 3 complete: All jobs already processed');
     return;
   }
 
+  // Limit to 20 jobs for testing
+  const PROCESSING_LIMIT = 20;
+  if (urlsToProcess.length > PROCESSING_LIMIT) {
+    log.info(`Limiting to ${PROCESSING_LIMIT} jobs (found ${urlsToProcess.length} total)`);
+    urlsToProcess = urlsToProcess.slice(0, PROCESSING_LIMIT);
+  }
+
   log.info(`Found ${urlsToProcess.length} new jobs to process`);
 
+  // Launch browser
   const browser = await puppeteer.launch({
     headless: config.crawler.headless,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
   });
 
-  const limit = pLimit(config.crawler.concurrency);
-  let successCount = 0;
-  let failedCount = 0;
-  const companyJobCounts = {};
-  const boardTypeStats = { greenhouse: 0, lever: 0, generic: 0 };
-
-  const processJobURL = async (url, index) => {
-    const boardType = detectJobBoardType(url);
-    log.progress(`Processing job ${index + 1}/${urlsToProcess.length} [${boardType}]: ${url}`);
-
-    const page = await browser.newPage();
-
-    try {
-      await page.setUserAgent(config.crawler.userAgent);
-      await page.setViewport({ width: 1920, height: 1080 });
-
-      const jobData = await extractJobDetails(page, url);
-      const companyName = extractCompanyName(url);
-      const companyDir = path.join(jobsDir, companyName);
-
-      if (!fs.existsSync(companyDir)) {
-        fs.mkdirSync(companyDir, { recursive: true });
-      }
-
-      const jobNumber = getNextJobNumber(companyDir);
-      const fileName = saveJobToFile(jobData, companyDir, jobNumber);
-
-      markJobAsProcessed(jobsDir, url);
-
-      companyJobCounts[companyName] = (companyJobCounts[companyName] || 0) + 1;
-      boardTypeStats[boardType]++;
-      successCount++;
-
-      log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
-    } catch (error) {
-      log.error(`Failed to extract job details from ${url}: ${error.message}`);
-      failedCount++;
-    } finally {
-      await page.close();
-    }
+  // Initialize statistics
+  const stats = {
+    successCount: 0,
+    failedCount: 0,
+    structuredCount: 0,
+    intelligentCount: 0,
+    companyJobCounts: {}
   };
 
-  await Promise.all(urlsToProcess.map((url, index) => limit(() => processJobURL(url, index))));
+  // Process URLs with concurrency limit
+  const limit = pLimit(config.crawler.concurrency);
+  await Promise.all(
+    urlsToProcess.map((url, index) =>
+      limit(() => processJobURL(browser, url, index, urlsToProcess.length, jobsDir, stats))
+    )
+  );
 
   await browser.close();
 
-  log.success(`Stage 3 complete: ${successCount} jobs saved to ${jobsDir}`);
-  log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${successCount}, Failed: ${failedCount}`);
-  log.info(`Board types - Greenhouse: ${boardTypeStats.greenhouse}, Lever: ${boardTypeStats.lever}, Generic: ${boardTypeStats.generic}`);
+  // Log summary
+  log.success(`Stage 3 complete: ${stats.successCount} jobs saved to ${jobsDir}`);
+  log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${stats.successCount}, Failed: ${stats.failedCount}`);
+  log.info(`Extraction methods - Structured Data: ${stats.structuredCount}, Intelligent Analysis: ${stats.intelligentCount}`);
 
-  if (Object.keys(companyJobCounts).length > 0) {
+  if (Object.keys(stats.companyJobCounts).length > 0) {
     log.info('Jobs saved by company:');
-    Object.entries(companyJobCounts).sort().forEach(([company, count]) => {
+    Object.entries(stats.companyJobCounts).sort().forEach(([company, count]) => {
       log.info(`  ${company}: ${count} jobs`);
     });
   }
