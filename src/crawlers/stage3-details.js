@@ -59,9 +59,11 @@ const tryExtractMultiple = async (page, selectors) => {
 const extractJobDetails = async (page, url, retryCount = 0) => {
   try {
     await page.goto(url, {
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded',
       timeout: config.crawler.pageTimeout
     });
+
+    await page.waitForTimeout(1000);
 
     const title = await tryExtractField(page, config.selectors.title);
     const description = await tryExtractHTML(page, config.selectors.description);
