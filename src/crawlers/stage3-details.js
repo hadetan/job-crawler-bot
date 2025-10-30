@@ -233,6 +233,142 @@ const extractLeverJob = async (page) => {
   };
 };
 
+// EyeCareCenter-specific extraction (uses CSS Modules)
+const extractEyeCareCenterJob = async (page) => {
+  const titleSelectors = [
+    'h1',
+    '[class*="job"] h1',
+    '[class*="title"]'
+  ];
+
+  const descriptionSelectors = [
+    '[class*="job_detail_content"]',
+    '[class*="job_content"]',
+    '[class*="description"]',
+    'main',
+    'article'
+  ];
+
+  const locationSelectors = [
+    '[class*="location"]',
+    '.location'
+  ];
+
+  const requirementsSelectors = [
+    '[class*="job_detail_content"] ul li',
+    '[class*="job_content"] ul li',
+    'main ul li',
+    'article ul li'
+  ];
+
+  const title = await tryExtractText(page, titleSelectors);
+  const description = await tryExtractHTML(page, descriptionSelectors);
+  let location = await tryExtractText(page, locationSelectors);
+
+  // EyeCareCenter embeds location in title, extract it
+  if (!location && title) {
+    const locationMatch = title.match(/in (.+?)$/);
+    if (locationMatch) {
+      location = locationMatch[1];
+    }
+  }
+
+  const skills = await tryExtractList(page, requirementsSelectors);
+
+  return {
+    title: title || 'N/A',
+    description: description || 'No description found',
+    location: location || 'Not specified',
+    skills
+  };
+};
+
+// BigID-specific extraction (Greenhouse embed, needs extra wait time)
+const extractBigIDJob = async (page) => {
+  // Wait longer for Greenhouse embed to load
+  await page.waitForTimeout(4000);
+
+  const titleSelectors = [
+    '#grnhse_app .app-title',
+    '#grnhse_app h1',
+    '.app-title',
+    'h1',
+    'h2' // Last resort fallback
+  ];
+
+  const descriptionSelectors = [
+    '#grnhse_app #content',
+    '#grnhse_app .content',
+    '#content',
+    '.content',
+    'main'
+  ];
+
+  const locationSelectors = [
+    '#grnhse_app .location',
+    '.location',
+    '[class*="location"]'
+  ];
+
+  const requirementsSelectors = [
+    '#grnhse_app #content ul li',
+    '#grnhse_app .content ul li',
+    '#content ul li',
+    'main ul li'
+  ];
+
+  const title = await tryExtractText(page, titleSelectors);
+  const description = await tryExtractHTML(page, descriptionSelectors);
+  const location = await tryExtractText(page, locationSelectors);
+  const skills = await tryExtractList(page, requirementsSelectors);
+
+  return {
+    title: title || 'N/A',
+    description: description || 'No description found',
+    location: location || 'Not specified',
+    skills
+  };
+};
+
+// Lob-specific extraction (custom Lever implementation)
+const extractLobJob = async (page) => {
+  const titleSelectors = [
+    'h1',
+    '.job-title',
+    '[class*="title"]'
+  ];
+
+  const descriptionSelectors = [
+    '[class*="description"]',
+    '[class*="content"]',
+    'main',
+    'article'
+  ];
+
+  const locationSelectors = [
+    '[class*="location"]',
+    '.location'
+  ];
+
+  const requirementsSelectors = [
+    'main ul li',
+    'article ul li',
+    '[class*="description"] ul li'
+  ];
+
+  const title = await tryExtractText(page, titleSelectors);
+  const description = await tryExtractHTML(page, descriptionSelectors);
+  const location = await tryExtractText(page, locationSelectors);
+  const skills = await tryExtractList(page, requirementsSelectors);
+
+  return {
+    title: title || 'N/A',
+    description: description || 'No description found',
+    location: location || 'Not specified',
+    skills
+  };
+};
+
 // Generic fallback extraction
 const extractGenericJob = async (page) => {
   const titleSelectors = [
