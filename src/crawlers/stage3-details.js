@@ -135,18 +135,26 @@ const extractFromStructuredData = async (page) => {
         // Extract fields
         const title = data.title || data.name || '';
 
-        // Description might be HTML, convert to text
+        // Description might be HTML, need to decode entities and convert to text
         let description = data.description || '';
         if (description) {
-          // First decode HTML entities (e.g., &lt; to <, &amp; to &)
-          // This handles cases where JSON-LD contains escaped HTML
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = description;
-          description = tempDiv.textContent || tempDiv.innerText || description;
+          // Decode HTML entities in browser context
+          description = await page.evaluate((desc) => {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = desc;
+            return tempDiv.innerHTML; // Get the decoded HTML
+          }, description);
 
-          // If still contains HTML tags, convert to text
+          // Now convert HTML to plain text using html-to-text
           if (description.includes('<')) {
-            description = description; // Already decoded, ready for convert
+            description = convert(description, {
+              wordwrap: 130,
+              preserveNewlines: true,
+              selectors: [
+                { selector: 'a', options: { ignoreHref: true } },
+                { selector: 'img', format: 'skip' }
+              ]
+            });
           }
         }
 
