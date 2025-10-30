@@ -32,6 +32,16 @@ const extractCompanyName = (url) => {
   }
 };
 
+const detectJobBoardType = (url) => {
+  if (url.includes('gh_jid=') || url.includes('greenhouse.io')) {
+    return 'greenhouse';
+  }
+  if (url.includes('lob.com/careers/job')) {
+    return 'lever';
+  }
+  return 'generic';
+};
+
 const getProcessedJobs = (jobsDir) => {
   const trackingFile = path.join(jobsDir, '.processed_urls.txt');
   if (!fs.existsSync(trackingFile)) {
@@ -63,139 +73,31 @@ const getNextJobNumber = (companyDir) => {
   return Math.max(...files) + 1;
 };
 
-// Intelligent content scoring system
-const scoreContent = (text, context = 'description') => {
-  if (!text || typeof text !== 'string') return 0;
-
-  const length = text.trim().length;
-  let score = 0;
-
-  // Length scoring
-  if (context === 'title') {
-    if (length > 10 && length < 100) score += 50;
-    if (length > 20 && length < 80) score += 30;
-  } else if (context === 'description') {
-    if (length > 200) score += 50;
-    if (length > 500) score += 30;
-    if (length > 1000) score += 20;
-  } else if (context === 'location') {
-    if (length > 3 && length < 100) score += 50;
-  }
-
-  // Job-specific keywords
-  const jobKeywords = {
-    title: ['engineer', 'developer', 'manager', 'analyst', 'designer', 'specialist', 'director', 'senior', 'junior', 'lead'],
-    description: ['responsibilities', 'requirements', 'qualifications', 'experience', 'skills', 'job', 'role', 'position', 'we are looking', 'you will'],
-    location: ['remote', 'hybrid', 'office', 'city', 'state', 'country', 'usa', 'uk', 'ca', 'ny', 'sf']
-  };
-
-  const lowerText = text.toLowerCase();
-  const relevantKeywords = jobKeywords[context] || [];
-
-  relevantKeywords.forEach(keyword => {
-    if (lowerText.includes(keyword)) score += 10;
-  });
-
-  // Penalize navigation-like content
-  const navIndicators = ['sign in', 'log in', 'menu', 'navigation', 'cookie', 'privacy policy', 'terms of service', 'all rights reserved'];
-  navIndicators.forEach(indicator => {
-    if (lowerText.includes(indicator)) score -= 50;
-  });
-
-  // Penalize repeated short words (likely navigation)
-  const words = text.split(/\s+/);
-  const uniqueWords = new Set(words);
-  if (words.length > 20 && uniqueWords.size < words.length * 0.3) {
-    score -= 30;
-  }
-
-  return Math.max(0, score);
-};
-
-const intelligentTitleExtraction = async (page) => {
-  const strategies = [
-    // Strategy 1: Common title classes/IDs
-    { selector: '.app-title, h1.app-title', name: 'app-title class' },
-    { selector: '[class*="job-title"]', name: 'job-title class' },
-    { selector: '[class*="position-title"]', name: 'position-title class' },
-    { selector: '#job-title', name: 'job-title id' },
-
-    // Strategy 2: Main h1 that's not navigation
-    { selector: 'main h1, article h1, .content h1', name: 'main content h1' },
-
-    // Strategy 3: First h1 on page
-    { selector: 'h1', name: 'first h1' },
-
-    // Strategy 4: Look for job-specific meta tags
-    { selector: '[property="og:title"]', attribute: 'content', name: 'og:title meta' }
-  ];
-
-  const candidates = [];
-
-  for (const strategy of strategies) {
+const tryExtractText = async (page, selectors) => {
+  for (const selector of selectors) {
     try {
-      const elements = await page.$$(strategy.selector);
-
-      for (const element of elements) {
-        let text;
-        if (strategy.attribute) {
-          text = await page.evaluate((el, attr) => el.getAttribute(attr), element, strategy.attribute);
-        } else {
-          text = await page.evaluate(el => el.textContent || el.innerText, element);
-        }
-
+      const element = await page.$(selector);
+      if (element) {
+        const text = await page.evaluate(el => el.textContent || el.innerText, element);
         if (text && text.trim()) {
-          const score = scoreContent(text.trim(), 'title');
-          candidates.push({ text: text.trim(), score, strategy: strategy.name });
+          return text.trim();
         }
       }
     } catch (error) {
-      // Strategy failed, continue
+      // Continue to next selector
     }
   }
-
-  // Return highest scoring candidate
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0].text;
-  }
-
   return '';
 };
 
-const intelligentDescriptionExtraction = async (page) => {
-  const strategies = [
-    // Strategy 1: Common job description containers
-    { selector: '.job-description, [class*="job-description"]', name: 'job-description class' },
-    { selector: '#job-description, [id*="job-description"]', name: 'job-description id' },
-    { selector: '.description, [class*="description"]', name: 'description class' },
-
-    // Strategy 2: Main content areas
-    { selector: 'main .content, article .content', name: 'main content' },
-    { selector: '#content, .main-content', name: 'content id' },
-
-    // Strategy 3: Largest text block (usually the description)
-    { selector: 'main, article, [role="main"]', name: 'main element' },
-
-    // Strategy 4: Job-specific sections
-    { selector: '[class*="posting"], [class*="job-post"]', name: 'posting class' }
-  ];
-
-  const candidates = [];
-
-  for (const strategy of strategies) {
+const tryExtractHTML = async (page, selectors) => {
+  for (const selector of selectors) {
     try {
-      const elements = await page.$$(strategy.selector);
-
-      for (const element of elements) {
+      const element = await page.$(selector);
+      if (element) {
         const html = await page.evaluate(el => el.innerHTML, element);
-
         if (html && html.trim()) {
-          // Remove script and style tags
-          const cleanHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                               .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
-
-          const text = convert(cleanHtml, {
+          const text = convert(html, {
             wordwrap: 130,
             preserveNewlines: true,
             selectors: [
@@ -203,136 +105,162 @@ const intelligentDescriptionExtraction = async (page) => {
               { selector: 'img', format: 'skip' }
             ]
           });
-
-          if (text && text.trim()) {
-            const score = scoreContent(text.trim(), 'description');
-            candidates.push({ text: text.trim(), score, strategy: strategy.name });
-          }
+          return text.trim();
         }
       }
     } catch (error) {
-      // Strategy failed, continue
+      // Continue to next selector
     }
   }
-
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0].text;
-  }
-
   return '';
 };
 
-const intelligentLocationExtraction = async (page) => {
-  const strategies = [
-    // Strategy 1: Common location classes/IDs
-    { selector: '.location, .job-location', name: 'location class' },
-    { selector: '[class*="location"]', name: 'location-like class' },
-    { selector: '#location', name: 'location id' },
-
-    // Strategy 2: Look for location meta tags
-    { selector: '[property="og:location"]', attribute: 'content', name: 'og:location meta' },
-
-    // Strategy 3: Text containing location patterns
-    { selector: '[class*="info"] span, [class*="detail"] span, [class*="meta"] span', name: 'info spans' }
-  ];
-
-  const candidates = [];
-  const locationPatterns = /\b(remote|hybrid|onsite|office|\w+,\s*\w+|usa|canada|uk|new york|san francisco|london|berlin|toronto)\b/i;
-
-  for (const strategy of strategies) {
+const tryExtractList = async (page, selectors) => {
+  for (const selector of selectors) {
     try {
-      const elements = await page.$$(strategy.selector);
-
-      for (const element of elements) {
-        let text;
-        if (strategy.attribute) {
-          text = await page.evaluate((el, attr) => el.getAttribute(attr), element, strategy.attribute);
-        } else {
-          text = await page.evaluate(el => el.textContent || el.innerText, element);
+      const elements = await page.$$(selector);
+      if (elements.length > 0) {
+        const items = [];
+        for (const element of elements) {
+          const text = await page.evaluate(el => el.textContent || el.innerText, element);
+          if (text && text.trim() && text.length > 10 && text.length < 300) {
+            items.push(text.trim());
+          }
         }
-
-        if (text && text.trim() && locationPatterns.test(text)) {
-          const score = scoreContent(text.trim(), 'location');
-          candidates.push({ text: text.trim(), score, strategy: strategy.name });
+        if (items.length > 0) {
+          return items;
         }
       }
     } catch (error) {
-      // Strategy failed, continue
+      // Continue to next selector
     }
   }
-
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0].text;
-  }
-
-  return '';
+  return [];
 };
 
-const intelligentSkillsExtraction = async (page) => {
-  const strategies = [
-    // Strategy 1: Specific skills/requirements sections
-    { selector: '[class*="requirement"] li, [class*="qualification"] li', name: 'requirements list' },
-    { selector: '[class*="skill"] li, [class*="skills"] li', name: 'skills list' },
-
-    // Strategy 2: Lists in job description that look like requirements
-    { selector: '.job-description ul li, [class*="description"] ul li', name: 'description lists' },
-
-    // Strategy 3: Any lists in main content
-    { selector: 'main ul li, article ul li', name: 'main content lists' }
+// Greenhouse-specific extraction (most common)
+const extractGreenhouseJob = async (page) => {
+  const titleSelectors = [
+    '.app-title',
+    'h1.app-title',
+    '[data-qa="job-title"]',
+    'h1'
   ];
 
-  const allSkills = [];
-  const skillKeywords = ['experience', 'knowledge', 'proficiency', 'ability', 'years', 'bachelor', 'degree', 'certification'];
+  const descriptionSelectors = [
+    '#content',
+    '.content',
+    '#app-body',
+    '.app-body',
+    '[data-qa="job-description"]'
+  ];
 
-  for (const strategy of strategies) {
-    try {
-      const elements = await page.$$(strategy.selector);
+  const locationSelectors = [
+    '.location',
+    '.app-location',
+    '[data-qa="job-location"]',
+    '.posting-categories .location'
+  ];
 
-      for (const element of elements) {
-        const text = await page.evaluate(el => el.textContent || el.innerText, element);
+  const requirementsSelectors = [
+    '#content ul li',
+    '.content ul li',
+    '#app-body ul li',
+    '[data-qa="job-description"] ul li'
+  ];
 
-        if (text && text.trim()) {
-          const cleanText = text.trim();
-          const lowerText = cleanText.toLowerCase();
+  const title = await tryExtractText(page, titleSelectors);
+  const description = await tryExtractHTML(page, descriptionSelectors);
+  const location = await tryExtractText(page, locationSelectors);
+  const skills = await tryExtractList(page, requirementsSelectors);
 
-          // Score this item as a potential skill/requirement
-          let isRelevant = false;
+  return {
+    title: title || 'N/A',
+    description: description || 'No description found',
+    location: location || 'Not specified',
+    skills
+  };
+};
 
-          // Check if it contains skill-related keywords
-          if (skillKeywords.some(kw => lowerText.includes(kw))) {
-            isRelevant = true;
-          }
+// Lever-specific extraction
+const extractLeverJob = async (page) => {
+  const titleSelectors = [
+    '.posting-headline h2',
+    'h2[data-qa="posting-name"]',
+    '.posting-header h2',
+    'h2'
+  ];
 
-          // Check if it's a reasonable length for a requirement (not too short, not too long)
-          if (cleanText.length > 15 && cleanText.length < 300) {
-            isRelevant = true;
-          }
+  const descriptionSelectors = [
+    '.posting-description .content',
+    '.section-wrapper .content',
+    '.posting-description',
+    '.content.description'
+  ];
 
-          // Exclude navigation-like items
-          if (lowerText.includes('sign in') || lowerText.includes('menu') || lowerText.includes('cookie')) {
-            isRelevant = false;
-          }
+  const locationSelectors = [
+    '.posting-categories .location',
+    '.posting-categories .sort-by-location',
+    '[data-qa="posting-location"]',
+    '.location'
+  ];
 
-          if (isRelevant) {
-            allSkills.push(cleanText);
-          }
-        }
-      }
+  const requirementsSelectors = [
+    '.posting-description ul li',
+    '.content.description ul li',
+    '.section-wrapper ul li'
+  ];
 
-      // If we found good skills with this strategy, return them
-      if (allSkills.length >= 3) {
-        break;
-      }
-    } catch (error) {
-      // Strategy failed, continue
-    }
-  }
+  const title = await tryExtractText(page, titleSelectors);
+  const description = await tryExtractHTML(page, descriptionSelectors);
+  const location = await tryExtractText(page, locationSelectors);
+  const skills = await tryExtractList(page, requirementsSelectors);
 
-  // Deduplicate and limit
-  const uniqueSkills = [...new Set(allSkills)];
-  return uniqueSkills.slice(0, 20); // Limit to 20 skills
+  return {
+    title: title || 'N/A',
+    description: description || 'No description found',
+    location: location || 'Not specified',
+    skills
+  };
+};
+
+// Generic fallback extraction
+const extractGenericJob = async (page) => {
+  const titleSelectors = [
+    'h1',
+    '[class*="title"]',
+    '[class*="job"]'
+  ];
+
+  const descriptionSelectors = [
+    'main',
+    'article',
+    '[role="main"]',
+    '.content'
+  ];
+
+  const locationSelectors = [
+    '.location',
+    '[class*="location"]'
+  ];
+
+  const requirementsSelectors = [
+    'main ul li',
+    'article ul li',
+    '.content ul li'
+  ];
+
+  const title = await tryExtractText(page, titleSelectors);
+  const description = await tryExtractHTML(page, descriptionSelectors);
+  const location = await tryExtractText(page, locationSelectors);
+  const skills = await tryExtractList(page, requirementsSelectors);
+
+  return {
+    title: title || 'N/A',
+    description: description || 'No description found',
+    location: location || 'Not specified',
+    skills
+  };
 };
 
 const extractJobDetails = async (page, url, retryCount = 0) => {
@@ -344,18 +272,23 @@ const extractJobDetails = async (page, url, retryCount = 0) => {
 
     await page.waitForTimeout(2000);
 
-    // Use intelligent extraction algorithms
-    const title = await intelligentTitleExtraction(page);
-    const description = await intelligentDescriptionExtraction(page);
-    const location = await intelligentLocationExtraction(page);
-    const skills = await intelligentSkillsExtraction(page);
+    const jobBoardType = detectJobBoardType(url);
+    let jobData;
+
+    switch (jobBoardType) {
+      case 'greenhouse':
+        jobData = await extractGreenhouseJob(page);
+        break;
+      case 'lever':
+        jobData = await extractLeverJob(page);
+        break;
+      default:
+        jobData = await extractGenericJob(page);
+    }
 
     return {
       url,
-      title: title || 'N/A',
-      description: description || 'No description found',
-      location: location || 'Not specified',
-      skills
+      ...jobData
     };
   } catch (error) {
     if (retryCount < config.retry.maxRetries) {
@@ -450,9 +383,12 @@ const runStage3 = async () => {
   let successCount = 0;
   let failedCount = 0;
   const companyJobCounts = {};
+  const boardTypeStats = { greenhouse: 0, lever: 0, generic: 0 };
 
   const processJobURL = async (url, index) => {
-    log.progress(`Processing job ${index + 1}/${urlsToProcess.length}: ${url}`);
+    const boardType = detectJobBoardType(url);
+    log.progress(`Processing job ${index + 1}/${urlsToProcess.length} [${boardType}]: ${url}`);
+
     const page = await browser.newPage();
 
     try {
@@ -473,6 +409,7 @@ const runStage3 = async () => {
       markJobAsProcessed(jobsDir, url);
 
       companyJobCounts[companyName] = (companyJobCounts[companyName] || 0) + 1;
+      boardTypeStats[boardType]++;
       successCount++;
 
       log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
@@ -490,6 +427,7 @@ const runStage3 = async () => {
 
   log.success(`Stage 3 complete: ${successCount} jobs saved to ${jobsDir}`);
   log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${successCount}, Failed: ${failedCount}`);
+  log.info(`Board types - Greenhouse: ${boardTypeStats.greenhouse}, Lever: ${boardTypeStats.lever}, Generic: ${boardTypeStats.generic}`);
 
   if (Object.keys(companyJobCounts).length > 0) {
     log.info('Jobs saved by company:');
