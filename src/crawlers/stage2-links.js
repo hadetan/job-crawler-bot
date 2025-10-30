@@ -20,6 +20,45 @@ const isValidJobURL = (url) => {
   }
 };
 
+const isJobDetailPage = (url) => {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname.toLowerCase();
+    const search = urlObj.search.toLowerCase();
+
+    // Exclude generic pages (careers home, listings, FAQ, etc.)
+    const excludePatterns = [
+      /\/careers\/?$/,           // Ends with /careers/ or /careers
+      /\/jobs\/?$/,              // Ends with /jobs/ or /jobs
+      /\/career\/?$/,            // Ends with /career/ or /career
+      /\/(faq|about|team|benefits|culture|life|perks|diversity|contact)[\/?]/,
+      /#job-board/,              // Hash fragments to job boards
+      /open-positions\/?$/,      // Generic "open positions" page
+      /\/[a-z]{2}\/.*careers\/?$/ // Localized pages ending in careers (e.g., /pt/careers/)
+    ];
+
+    for (const pattern of excludePatterns) {
+      if (pattern.test(pathname) || pattern.test(search)) {
+        return false;
+      }
+    }
+
+    // Job detail pages typically have job IDs (numbers/alphanumeric) in URL
+    const hasJobId = /\d{7,}/.test(pathname + search) ||  // Long numbers (Greenhouse IDs)
+                     /gh_jid=/.test(search) ||            // Greenhouse job ID param
+                     /\/jobs?\/[a-zA-Z0-9-]+/.test(pathname) ||  // /job/some-job-title-123
+                     /job[-_]?id=/i.test(search);         // job_id or jobId param
+
+    // Must have job ID or be deep enough path (3+ segments after domain)
+    const pathSegments = pathname.split('/').filter(Boolean);
+    const isDeepPath = pathSegments.length >= 3;
+
+    return hasJobId || isDeepPath;
+  } catch {
+    return false;
+  }
+};
+
 const extractJobLinks = async (page, url, retryCount = 0) => {
   try {
     await page.goto(url, {
