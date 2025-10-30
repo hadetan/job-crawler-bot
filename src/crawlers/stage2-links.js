@@ -129,7 +129,8 @@ const extractJobLinks = async (page, url, retryCount = 0) => {
         }
       })
       .filter(Boolean)
-      .filter(isJobDetailPage);
+      .filter(isJobDetailPage)
+      .filter(link => !hasNonEnglishLocale(link));
 
     return validLinks;
   } catch (error) {
