@@ -138,22 +138,21 @@ const extractFromStructuredData = async (page) => {
         // Description might be HTML with encoded entities, need to decode and convert to text
         let description = data.description || '';
         if (description && description.length > 0) {
-          // Decode HTML entities in browser context (e.g., &lt; becomes <)
+          // Decode HTML entities AND strip all HTML tags in browser context
           description = await page.evaluate((desc) => {
             const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = desc;
-            return tempDiv.innerHTML; // Returns decoded HTML
-          }, description);
+            tempDiv.innerHTML = desc; // Decodes entities and parses HTML
 
-          // Now convert the decoded HTML to plain text using html-to-text
-          description = convert(description, {
-            wordwrap: 130,
-            preserveNewlines: true,
-            selectors: [
-              { selector: 'a', options: { ignoreHref: true } },
-              { selector: 'img', format: 'skip' }
-            ]
-          });
+            // Get text content (strips all HTML tags automatically)
+            let text = tempDiv.textContent || tempDiv.innerText || '';
+
+            // Clean up excessive whitespace
+            text = text.replace(/\s+/g, ' ').trim();
+
+            // Restore paragraph breaks where appropriate
+            const lines = text.split(/\.\s+/).map(s => s.trim()).filter(Boolean);
+            return lines.join('. ');
+          }, description);
         }
 
         // Extract location (can be nested)
