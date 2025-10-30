@@ -138,6 +138,9 @@ const extractFromStructuredData = async (page) => {
         // Description might be HTML with encoded entities, need to decode and convert to text
         let description = data.description || '';
         if (description && description.length > 0) {
+          console.log('[DEBUG] Processing structured data description, length:', description.length);
+          console.log('[DEBUG] First 100 chars:', description.substring(0, 100));
+
           // Decode HTML entities AND strip all HTML tags in browser context
           description = await page.evaluate((desc) => {
             const tempDiv = document.createElement('div');
@@ -153,6 +156,9 @@ const extractFromStructuredData = async (page) => {
             const lines = text.split(/\.\s+/).map(s => s.trim()).filter(Boolean);
             return lines.join('. ');
           }, description);
+
+          console.log('[DEBUG] After processing, length:', description.length);
+          console.log('[DEBUG] First 100 chars after:', description.substring(0, 100));
         }
 
         // Extract location (can be nested)
