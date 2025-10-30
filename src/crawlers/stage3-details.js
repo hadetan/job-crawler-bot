@@ -332,54 +332,77 @@ const extractWithIntelligentAnalysis = async (page) => {
 
     // Step 3: Extract description intelligently
     const description = await page.evaluate(() => {
-      const containers = Array.from(document.querySelectorAll('article, main, [role="main"], div'));
+      // First, remove navigation and footer elements from consideration
+      const removeSelectors = [
+        'nav',
+        'header',
+        'footer',
+        '[role="navigation"]',
+        '[class*="nav"]',
+        '[class*="menu"]',
+        '[class*="header"]',
+        '[class*="footer"]',
+        '[class*="sidebar"]',
+        '[aria-label*="navigation"]',
+        '[aria-label*="menu"]'
+      ];
+
+      // Clone the body to work with
+      const workingBody = document.body.cloneNode(true);
+
+      // Remove navigation/footer elements
+      removeSelectors.forEach(selector => {
+        workingBody.querySelectorAll(selector).forEach(el => el.remove());
+      });
+
+      // Now find content containers
+      const containers = Array.from(workingBody.querySelectorAll('article, main, [role="main"], section, div'));
 
       // Job-related keywords to boost score
-      const jobKeywords = ['responsibilities', 'requirements', 'qualifications', 'description', 'about the role', 'what you'];
+      const jobKeywords = ['responsibilities', 'requirements', 'qualifications', 'description', 'about the role', 'what you', 'your responsibilities', 'key qualifications'];
 
       let bestContainers = [];
       let maxScore = 0;
 
       for (const container of containers) {
-        // Skip if in navigation or footer
-        const rect = container.getBoundingClientRect();
-        const windowHeight = window.innerHeight;
-
-        // Skip top navigation (first 100px)
-        if (rect.top < 100 && rect.height < 200) continue;
-
-        // Skip footer (bottom 20% of page)
-        if (rect.top > windowHeight * 0.8) continue;
-
-        // Skip narrow containers (likely sidebars)
-        if (rect.width < 300) continue;
-
         // Get text content
         const text = container.textContent || '';
         const textLength = text.trim().length;
 
-        // Skip if too short
-        if (textLength < 200) continue;
+        // Skip if too short (less than 300 chars for job description)
+        if (textLength < 300) continue;
+
+        // Skip if contains too many list items (likely navigation)
+        const listItems = container.querySelectorAll('li');
+        if (listItems.length > 20) continue;
 
         // Calculate text density (text per element)
         const childCount = container.querySelectorAll('*').length || 1;
         const textDensity = textLength / childCount;
 
+        // Skip low density (likely has lots of nested divs)
+        if (textDensity < 5) continue;
+
         // Calculate link ratio (high link ratio = navigation, skip)
         const links = container.querySelectorAll('a');
+        const linkCount = links.length;
         const linkText = Array.from(links).reduce((sum, link) => sum + (link.textContent || '').length, 0);
         const linkRatio = textLength > 0 ? linkText / textLength : 0;
 
-        if (linkRatio > 0.5) continue; // Too many links, likely navigation
+        // Skip if too many links
+        if (linkRatio > 0.3 || linkCount > 10) continue;
 
         // Check for job-related keywords
         const lowerText = text.toLowerCase();
         const keywordCount = jobKeywords.filter(kw => lowerText.includes(kw)).length;
 
-        // Calculate quality score
-        const score = textDensity * (1 + keywordCount * 0.5);
+        // Must have at least 1 job keyword to be considered
+        if (keywordCount === 0) continue;
 
-        if (score > maxScore * 0.7) { // Keep containers within 70% of max score
+        // Calculate quality score
+        const score = textDensity * (1 + keywordCount * 2); // Higher weight on keywords
+
+        if (score > maxScore * 0.7) {
           if (score > maxScore) {
             maxScore = score;
           }
@@ -395,12 +418,10 @@ const extractWithIntelligentAnalysis = async (page) => {
       for (const candidate of bestContainers) {
         let isNested = false;
         for (const existing of uniqueContainers) {
-          // Check if candidate is inside existing
           if (existing.container.contains(candidate.container)) {
             isNested = true;
             break;
           }
-          // Check if existing is inside candidate (replace if so)
           if (candidate.container.contains(existing.container)) {
             const index = uniqueContainers.indexOf(existing);
             uniqueContainers.splice(index, 1);
@@ -412,7 +433,7 @@ const extractWithIntelligentAnalysis = async (page) => {
         }
       }
 
-      // Take only the best unique container (not multiple to avoid duplication)
+      // Take only the best unique container
       const topContainer = uniqueContainers.length > 0 ? uniqueContainers[0].container : null;
 
       return topContainer ? topContainer.innerHTML : '';
