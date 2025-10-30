@@ -696,6 +696,9 @@ const extractJobDetails = async (page, url) => {
         };
       } else {
         failureReasons.push(`Structured data validation failed: ${validation.reason}`);
+        console.log('[DEBUG] Structured data extracted but failed validation:', validation.reason);
+        console.log('[DEBUG] Title:', structuredData.title?.substring(0, 50));
+        console.log('[DEBUG] Description length:', structuredData.description?.length);
       }
     } else {
       failureReasons.push('No structured data found');
@@ -705,6 +708,16 @@ const extractJobDetails = async (page, url) => {
     const intelligentData = await extractWithIntelligentAnalysis(page);
     if (intelligentData) {
       const validation = validateExtractedContent(intelligentData);
+
+      // TEMPORARILY: Save even if validation fails, for debugging
+      console.log('[DEBUG] Intelligent analysis result:', {
+        title: intelligentData.title?.substring(0, 50),
+        descLength: intelligentData.description?.length,
+        location: intelligentData.location,
+        skillsCount: intelligentData.skills?.length,
+        validationResult: validation
+      });
+
       if (validation.valid) {
         return {
           url,
@@ -712,7 +725,13 @@ const extractJobDetails = async (page, url) => {
           source: 'intelligent-analysis'
         };
       } else {
-        failureReasons.push(`Intelligent analysis validation failed: ${validation.reason}`);
+        // For debugging: return the data anyway with a warning flag
+        return {
+          url,
+          ...intelligentData,
+          source: 'intelligent-analysis-unvalidated',
+          _validationWarning: validation.reason
+        };
       }
     } else {
       failureReasons.push('Intelligent analysis returned no data (likely error page)');
