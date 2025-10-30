@@ -37,7 +37,12 @@ const isJobDetailPage = (url) => {
       /episodes\//,              // Blog episodes
       /#job-board/,              // Hash fragments to job boards
       /open-positions\/?$/,      // Generic "open positions" page
-      /\/[a-z]{2}\/.*careers\/?$/ // Localized pages ending in careers (e.g., /pt/careers/)
+      /\/[a-z]{2}\/.*careers\/?$/,  // Localized pages ending in careers (e.g., /pt/careers/)
+      /\/apply\/?$/,             // Application forms (when /apply is at the end)
+      /\/(search|all|university)\/?$/,  // Search, "view all", university pages
+      /\/departments?\/?$/,      // Department listing pages
+      /\/(chicago|dublin|tokyo|london|munich|new-york|san-francisco|paris|reykjavik|sydney|singapore|vancouver|warsaw|nyc|sf|la|boston|seattle|austin|denver|atlanta|miami|dallas|houston|phoenix|portland|philadelphia|berlin|amsterdam|barcelona|madrid|rome|milan|stockholm|oslo|copenhagen|helsinki|zurich|vienna|brussels|lisbon|prague|budapest|toronto|montreal|melbourne|bangalore|mumbai|delhi|shanghai|beijing|hong-kong|seoul|taipei)\/?$/i,
+      /\/(business|engineering|product|internal|design|marketing|sales|support|operations|finance|legal|data|security|infrastructure|research|university-recruiting|internship)\/?$/i  // Department/team filter pages
     ];
 
     for (const pattern of excludePatterns) {
