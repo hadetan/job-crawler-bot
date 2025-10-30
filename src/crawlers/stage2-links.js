@@ -23,9 +23,11 @@ const isValidJobURL = (url) => {
 const extractJobLinks = async (page, url, retryCount = 0) => {
   try {
     await page.goto(url, {
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded',
       timeout: config.crawler.pageTimeout
     });
+
+    await page.waitForTimeout(1000);
 
     const links = [];
 
