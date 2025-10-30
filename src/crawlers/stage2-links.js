@@ -174,8 +174,8 @@ const extractJobLinks = async (page, url, retryCount = 0) => {
         }
       })
       .filter(Boolean)
-      .filter(isJobDetailPage)
-      .filter(link => !hasNonEnglishLocale(link));
+      .filter(isJobDetailPage);
+      // Locale deduplication is now handled by job ID-based normalizeURL()
 
     return validLinks;
   } catch (error) {
