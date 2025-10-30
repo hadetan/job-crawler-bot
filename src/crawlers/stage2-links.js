@@ -37,7 +37,12 @@ const isJobDetailPage = (url) => {
       /episodes\//,              // Blog episodes
       /#job-board/,              // Hash fragments to job boards
       /open-positions\/?$/,      // Generic "open positions" page
-      /\/[a-z]{2}\/.*careers\/?$/ // Localized pages ending in careers (e.g., /pt/careers/)
+      /\/[a-z]{2}\/.*careers\/?$/,  // Localized pages ending in careers (e.g., /pt/careers/)
+      /\/apply\/?$/,             // Application forms (when /apply is at the end)
+      /\/(search|all|university)\/?$/,  // Search, "view all", university pages
+      /\/departments?\/?$/,      // Department listing pages
+      /\/(chicago|dublin|tokyo|london|munich|new-york|san-francisco|paris|reykjavik|sydney|singapore|vancouver|warsaw|nyc|sf|la|boston|seattle|austin|denver|atlanta|miami|dallas|houston|phoenix|portland|philadelphia|berlin|amsterdam|barcelona|madrid|rome|milan|stockholm|oslo|copenhagen|helsinki|zurich|vienna|brussels|lisbon|prague|budapest|toronto|montreal|melbourne|bangalore|mumbai|delhi|shanghai|beijing|hong-kong|seoul|taipei)\/?$/i,
+      /\/(business|engineering|product|internal|design|marketing|sales|support|operations|finance|legal|data|security|infrastructure|research|university-recruiting|internship)\/?$/i  // Department/team filter pages
     ];
 
     for (const pattern of excludePatterns) {
@@ -57,6 +62,35 @@ const isJobDetailPage = (url) => {
     const isDeepPath = pathSegments.length >= 3;
 
     return hasJobId || isDeepPath;
+  } catch {
+    return false;
+  }
+};
+
+const hasNonEnglishLocale = (url) => {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+
+    // Non-English language codes to filter out
+    const nonEnglishLanguages = [
+      'fr', 'de', 'es', 'it', 'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'sv',
+      'zh', 'ar', 'id', 'th', 'vi', 'tr', 'da', 'fi', 'no', 'cs', 'hu',
+      'ro', 'bg', 'hr', 'sk', 'sl', 'lt', 'lv', 'et', 'el', 'he', 'hi'
+    ];
+
+    // Check for locale patterns at start of path:
+    // /fr/, /de/, /fr-ca/, /es-mx/, /de-ch/, /zh-cn/, /pt-br/, etc.
+    // Pattern: /[2-letter-code]/ or /[2-letter-code]-[2-letter-code]/
+    const localePattern = /^\/([a-z]{2})(?:-[a-z]{2})?\//;
+    const match = pathname.match(localePattern);
+
+    if (match) {
+      const languageCode = match[1]; // Extract the language part (e.g., 'fr' from '/fr-ca/')
+      return nonEnglishLanguages.includes(languageCode);
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -95,7 +129,8 @@ const extractJobLinks = async (page, url, retryCount = 0) => {
         }
       })
       .filter(Boolean)
-      .filter(isJobDetailPage);
+      .filter(isJobDetailPage)
+      .filter(link => !hasNonEnglishLocale(link));
 
     return validLinks;
   } catch (error) {
