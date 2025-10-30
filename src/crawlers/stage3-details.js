@@ -796,11 +796,18 @@ const runStage3 = async () => {
   }
 
   const processedJobs = getProcessedJobs(jobsDir);
-  const urlsToProcess = jobURLs.filter(url => !processedJobs.has(normalizeURL(url)));
+  let urlsToProcess = jobURLs.filter(url => !processedJobs.has(normalizeURL(url)));
 
   if (urlsToProcess.length === 0) {
     log.info('Stage 3 complete: All jobs already processed');
     return;
+  }
+
+  // Limit to 20 jobs for testing
+  const PROCESSING_LIMIT = 20;
+  if (urlsToProcess.length > PROCESSING_LIMIT) {
+    log.info(`Limiting to ${PROCESSING_LIMIT} jobs (found ${urlsToProcess.length} total)`);
+    urlsToProcess = urlsToProcess.slice(0, PROCESSING_LIMIT);
   }
 
   log.info(`Found ${urlsToProcess.length} new jobs to process`);
