@@ -546,60 +546,56 @@ const validateExtractedContent = (jobData) => {
   return { valid: true, reason: null };
 };
 
-const extractJobDetails = async (page, url, retryCount = 0) => {
+const extractJobDetails = async (page, url) => {
   try {
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: config.crawler.pageTimeout
     });
 
-    await page.waitForTimeout(2000);
+    // Wait longer for dynamic content to load (increased from 2000ms)
+    await page.waitForTimeout(3000);
 
-    // Prioritize company-specific extraction
-    const company = detectCompany(url);
-    let jobData;
+    const failureReasons = [];
 
-    switch (company) {
-      case 'bigid':
-        jobData = await extractBigIDJob(page);
-        break;
-      case 'eyecarecenter':
-        jobData = await extractEyeCareCenterJob(page);
-        break;
-      case 'lob':
-        jobData = await extractLobJob(page);
-        break;
-      case 'elixirr':
-        // Elixirr uses standard Greenhouse
-        jobData = await extractGreenhouseJob(page);
-        break;
-      default:
-        // Fall back to board type detection
-        const jobBoardType = detectJobBoardType(url);
-        switch (jobBoardType) {
-          case 'greenhouse':
-            jobData = await extractGreenhouseJob(page);
-            break;
-          case 'lever':
-            jobData = await extractLeverJob(page);
-            break;
-          default:
-            jobData = await extractGenericJob(page);
-        }
+    // Layer 1: Try structured data extraction
+    const structuredData = await extractFromStructuredData(page);
+    if (structuredData) {
+      const validation = validateExtractedContent(structuredData);
+      if (validation.valid) {
+        return {
+          url,
+          ...structuredData,
+          source: 'structured-data'
+        };
+      } else {
+        failureReasons.push(`Structured data validation failed: ${validation.reason}`);
+      }
+    } else {
+      failureReasons.push('No structured data found');
     }
 
-    return {
-      url,
-      ...jobData
-    };
+    // Layer 2: Try intelligent analysis
+    const intelligentData = await extractWithIntelligentAnalysis(page);
+    if (intelligentData) {
+      const validation = validateExtractedContent(intelligentData);
+      if (validation.valid) {
+        return {
+          url,
+          ...intelligentData,
+          source: 'intelligent-analysis'
+        };
+      } else {
+        failureReasons.push(`Intelligent analysis validation failed: ${validation.reason}`);
+      }
+    } else {
+      failureReasons.push('Intelligent analysis returned no data (likely error page)');
+    }
+
+    // Both layers failed
+    throw new Error(`Failed to extract valid content: ${failureReasons.join('; ')}`);
   } catch (error) {
-    if (retryCount < config.retry.maxRetries) {
-      const delay = config.retry.retryDelay * (retryCount + 1);
-      log.progress(`Failed to load ${url}, retrying in ${delay}ms... (Attempt ${retryCount + 1}/${config.retry.maxRetries})`);
-      await sleep(delay);
-      return extractJobDetails(page, url, retryCount + 1);
-    }
-
+    // Re-throw with original message for navigation/timeout errors
     throw error;
   }
 };
