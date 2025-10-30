@@ -709,15 +709,6 @@ const extractJobDetails = async (page, url) => {
     if (intelligentData) {
       const validation = validateExtractedContent(intelligentData);
 
-      // TEMPORARILY: Save even if validation fails, for debugging
-      console.log('[DEBUG] Intelligent analysis result:', {
-        title: intelligentData.title?.substring(0, 50),
-        descLength: intelligentData.description?.length,
-        location: intelligentData.location,
-        skillsCount: intelligentData.skills?.length,
-        validationResult: validation
-      });
-
       if (validation.valid) {
         return {
           url,
@@ -725,13 +716,7 @@ const extractJobDetails = async (page, url) => {
           source: 'intelligent-analysis'
         };
       } else {
-        // For debugging: return the data anyway with a warning flag
-        return {
-          url,
-          ...intelligentData,
-          source: 'intelligent-analysis-unvalidated',
-          _validationWarning: validation.reason
-        };
+        failureReasons.push(`Intelligent analysis validation failed: ${validation.reason}`);
       }
     } else {
       failureReasons.push('Intelligent analysis returned no data (likely error page)');
