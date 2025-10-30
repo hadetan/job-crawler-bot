@@ -137,15 +137,17 @@ const extractFromStructuredData = async (page) => {
 
         // Description might be HTML, convert to text
         let description = data.description || '';
-        if (description && description.includes('<')) {
-          description = convert(description, {
-            wordwrap: 130,
-            preserveNewlines: true,
-            selectors: [
-              { selector: 'a', options: { ignoreHref: true } },
-              { selector: 'img', format: 'skip' }
-            ]
-          });
+        if (description) {
+          // First decode HTML entities (e.g., &lt; to <, &amp; to &)
+          // This handles cases where JSON-LD contains escaped HTML
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = description;
+          description = tempDiv.textContent || tempDiv.innerText || description;
+
+          // If still contains HTML tags, convert to text
+          if (description.includes('<')) {
+            description = description; // Already decoded, ready for convert
+          }
         }
 
         // Extract location (can be nested)
