@@ -680,12 +680,12 @@ const runStage3 = async () => {
   const limit = pLimit(config.crawler.concurrency);
   let successCount = 0;
   let failedCount = 0;
+  let structuredCount = 0;
+  let intelligentCount = 0;
   const companyJobCounts = {};
-  const boardTypeStats = { greenhouse: 0, lever: 0, generic: 0 };
 
   const processJobURL = async (url, index) => {
-    const boardType = detectJobBoardType(url);
-    log.progress(`Processing job ${index + 1}/${urlsToProcess.length} [${boardType}]: ${url}`);
+    log.progress(`Processing job ${index + 1}/${urlsToProcess.length}: ${url}`);
 
     const page = await browser.newPage();
 
