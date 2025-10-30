@@ -106,28 +106,6 @@ const tryExtractHTML = async (page, selectors) => {
   return '';
 };
 
-const tryExtractList = async (page, selectors) => {
-  for (const selector of selectors) {
-    try {
-      const elements = await page.$$(selector);
-      if (elements.length > 0) {
-        const items = [];
-        for (const element of elements) {
-          const text = await page.evaluate(el => el.textContent || el.innerText, element);
-          if (text && text.trim() && text.length > 10 && text.length < 300) {
-            items.push(text.trim());
-          }
-        }
-        if (items.length > 0) {
-          return items;
-        }
-      }
-    } catch (error) {
-      // Continue to next selector
-    }
-  }
-  return [];
-};
 
 
 const extractJobDetails = async (page, url, retryCount = 0) => {
