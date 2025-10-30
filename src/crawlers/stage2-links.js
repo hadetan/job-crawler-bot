@@ -91,7 +91,8 @@ const extractJobLinks = async (page, url, retryCount = 0) => {
           return null;
         }
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter(isJobDetailPage);
 
     return validLinks;
   } catch (error) {
