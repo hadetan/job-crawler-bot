@@ -32,6 +32,15 @@ const extractCompanyName = (url) => {
   }
 };
 
+const detectCompany = (url) => {
+  const urlLower = url.toLowerCase();
+  if (urlLower.includes('bigid.com')) return 'bigid';
+  if (urlLower.includes('eyecarecenter.com')) return 'eyecarecenter';
+  if (urlLower.includes('lob.com')) return 'lob';
+  if (urlLower.includes('elixirr.com')) return 'elixirr';
+  return 'generic';
+};
+
 const detectJobBoardType = (url) => {
   if (url.includes('gh_jid=') || url.includes('greenhouse.io')) {
     return 'greenhouse';
