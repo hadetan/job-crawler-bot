@@ -470,13 +470,43 @@ const extractWithIntelligentAnalysis = async (page) => {
       const lists = Array.from(document.querySelectorAll('ul, ol'));
       const skillItems = [];
 
+      // Navigation keywords to exclude
+      const navKeywords = [
+        'working at',
+        'how to apply',
+        'life in',
+        'athletics',
+        'business and finance',
+        'human resources',
+        'login',
+        'sign in',
+        'register',
+        'home',
+        'about',
+        'contact',
+        'careers',
+        'jobs',
+        'english',
+        'language'
+      ];
+
       for (const list of lists) {
+        // Check position - skip if in top 200px (header/navigation area)
+        const rect = list.getBoundingClientRect();
+        if (rect.top < 200) continue;
+
         // Check if list is in navigation/footer
         let parent = list.parentElement;
         let inNavOrFooter = false;
         for (let i = 0; i < 5 && parent; i++) {
           const role = parent.getAttribute('role');
-          if (parent.tagName === 'NAV' || role === 'navigation' || parent.tagName === 'FOOTER') {
+          const className = parent.className || '';
+          if (parent.tagName === 'NAV' ||
+              role === 'navigation' ||
+              parent.tagName === 'FOOTER' ||
+              className.includes('nav') ||
+              className.includes('menu') ||
+              className.includes('header')) {
             inNavOrFooter = true;
             break;
           }
@@ -484,14 +514,35 @@ const extractWithIntelligentAnalysis = async (page) => {
         }
         if (inNavOrFooter) continue;
 
-        // Check if parent section has relevant heading
+        // Get list items
         const items = Array.from(list.querySelectorAll('li'));
+
+        // Check if this looks like a navigation list (many short items)
+        const shortItems = items.filter(item => item.textContent.trim().length < 30);
+        if (shortItems.length > 5 && shortItems.length > items.length * 0.7) {
+          continue; // Probably navigation
+        }
+
+        // Extract items
         for (const item of items) {
           const text = item.textContent.trim();
-          if (text.length >= 10 && text.length <= 500) {
-            skillItems.push(text);
-          }
+
+          // Skip if too short or too long
+          if (text.length < 15 || text.length > 500) continue;
+
+          // Skip if matches navigation keywords
+          const lowerText = text.toLowerCase();
+          if (navKeywords.some(kw => lowerText.includes(kw))) continue;
+
+          // Skip if contains links (navigation item)
+          const links = item.querySelectorAll('a');
+          if (links.length > 0 && text.length < 50) continue;
+
+          skillItems.push(text);
         }
+
+        // If we found good items, we can stop (found the requirements section)
+        if (skillItems.length > 3) break;
       }
 
       return skillItems;
