@@ -138,27 +138,24 @@ const extractFromStructuredData = async (page) => {
         // Description might be HTML with encoded entities, need to decode and convert to text
         let description = data.description || '';
         if (description && description.length > 0) {
-          console.log('[DEBUG] Processing structured data description, length:', description.length);
-          console.log('[DEBUG] First 100 chars:', description.substring(0, 100));
-
-          // Decode HTML entities AND strip all HTML tags in browser context
+          // Step 1: Decode HTML entities using browser (most reliable)
           description = await page.evaluate((desc) => {
             const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = desc; // Decodes entities and parses HTML
-
-            // Get text content (strips all HTML tags automatically)
-            let text = tempDiv.textContent || tempDiv.innerText || '';
-
-            // Clean up excessive whitespace
-            text = text.replace(/\s+/g, ' ').trim();
-
-            // Restore paragraph breaks where appropriate
-            const lines = text.split(/\.\s+/).map(s => s.trim()).filter(Boolean);
-            return lines.join('. ');
+            tempDiv.innerHTML = desc;
+            return tempDiv.innerHTML; // Returns decoded HTML
           }, description);
 
-          console.log('[DEBUG] After processing, length:', description.length);
-          console.log('[DEBUG] First 100 chars after:', description.substring(0, 100));
+          // Step 2: Strip HTML tags and convert to plain text using html-to-text
+          description = convert(description, {
+            wordwrap: 130,
+            preserveNewlines: true,
+            selectors: [
+              { selector: 'a', options: { ignoreHref: true } },
+              { selector: 'img', format: 'skip' },
+              { selector: 'p', options: { leadingLineBreaks: 1, trailingLineBreaks: 1 } },
+              { selector: 'br', options: { leadingLineBreaks: 1 } }
+            ]
+          });
         }
 
         // Extract location (can be nested)
