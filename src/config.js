@@ -45,11 +45,7 @@ const config = {
     dir: process.env.OUTPUT_DIR || './output'
   },
   selectors: {
-    jobLinks: parseSelectors(process.env.JOB_LINK_SELECTORS, ['a[href*="/jobs/"]', 'a[href*="/job/"]', 'a[href*="/careers/"]']),
-    title: parseSelectors(process.env.JOB_TITLE_SELECTORS, ['h1', '.job-title', '[class*="title"]']),
-    description: parseSelectors(process.env.JOB_DESCRIPTION_SELECTORS, ['.job-description', '[class*="description"]', '.content']),
-    location: parseSelectors(process.env.JOB_LOCATION_SELECTORS, ['.location', '[class*="location"]', '[data-location]']),
-    skills: parseSelectors(process.env.JOB_SKILLS_SELECTORS, ['.skills', '[class*="skill"]', '[class*="requirement"]'])
+    jobLinks: parseSelectors(process.env.JOB_LINK_SELECTORS, ['a[href*="/jobs/"]', 'a[href*="/job/"]', 'a[href*="/careers/"]'])
   }
 };
 
