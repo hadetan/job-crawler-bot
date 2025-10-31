@@ -7,56 +7,56 @@ const runStage2 = require('./crawlers/stage2-links');
 const runStage3 = require('./crawlers/stage3-details');
 
 const parseArgs = () => {
-  const args = process.argv.slice(2);
-  const stageArg = args.find(arg => arg.startsWith('--stage='));
+    const args = process.argv.slice(2);
+    const stageArg = args.find(arg => arg.startsWith('--stage='));
 
-  if (stageArg) {
-    const stage = stageArg.split('=')[1];
-    return parseInt(stage, 10);
-  }
+    if (stageArg) {
+        const stage = stageArg.split('=')[1];
+        return parseInt(stage, 10);
+    }
 
-  return null;
+    return null;
 };
 
 const validateInputFile = (filePath, stageName) => {
-  if (!fs.existsSync(filePath)) {
-    log.error(`Cannot run ${stageName} - ${filePath} not found. Run previous stage first.`);
-    process.exit(1);
-  }
+    if (!fs.existsSync(filePath)) {
+        log.error(`Cannot run ${stageName} - ${filePath} not found. Run previous stage first.`);
+        process.exit(1);
+    }
 };
 
 const main = async () => {
-  const startTime = Date.now();
+    const startTime = Date.now();
 
-  try {
-    const stage = parseArgs();
+    try {
+        const stage = parseArgs();
 
-    if (stage !== null) {
-      if (stage === 1) {
-        await runStage1();
-      } else if (stage === 2) {
-        validateInputFile(path.join(config.output.dir, 'urls.csv'), 'Stage 2');
-        await runStage2();
-      } else if (stage === 3) {
-        validateInputFile(path.join(config.output.dir, 'job_links.csv'), 'Stage 3');
-        await runStage3();
-      } else {
-        log.error(`Invalid stage '${stage}'. Valid stages are 1, 2, or 3.`);
+        if (stage !== null) {
+            if (stage === 1) {
+                await runStage1();
+            } else if (stage === 2) {
+                validateInputFile(path.join(config.output.dir, 'urls.csv'), 'Stage 2');
+                await runStage2();
+            } else if (stage === 3) {
+                validateInputFile(path.join(config.output.dir, 'job_links.csv'), 'Stage 3');
+                await runStage3();
+            } else {
+                log.error(`Invalid stage '${stage}'. Valid stages are 1, 2, or 3.`);
+                process.exit(1);
+            }
+        } else {
+            await runStage1();
+            await runStage2();
+            await runStage3();
+        }
+
+        const endTime = Date.now();
+        const duration = ((endTime - startTime) / 1000).toFixed(2);
+        log.success(`All operations completed in ${duration}s`);
+    } catch (error) {
+        log.error(`Fatal error: ${error.message}`);
         process.exit(1);
-      }
-    } else {
-      await runStage1();
-      await runStage2();
-      await runStage3();
     }
-
-    const endTime = Date.now();
-    const duration = ((endTime - startTime) / 1000).toFixed(2);
-    log.success(`All operations completed in ${duration}s`);
-  } catch (error) {
-    log.error(`Fatal error: ${error.message}`);
-    process.exit(1);
-  }
 };
 
 main();

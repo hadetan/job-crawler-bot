@@ -7,20 +7,20 @@ const { convert } = require('html-to-text');
  * @returns {Promise<string>} Extracted text or empty string
  */
 const tryExtractText = async (page, selectors) => {
-  for (const selector of selectors) {
-    try {
-      const element = await page.$(selector);
-      if (element) {
-        const text = await page.evaluate(el => el.textContent || el.innerText, element);
-        if (text && text.trim()) {
-          return text.trim();
+    for (const selector of selectors) {
+        try {
+            const element = await page.$(selector);
+            if (element) {
+                const text = await page.evaluate(el => el.textContent || el.innerText, element);
+                if (text && text.trim()) {
+                    return text.trim();
+                }
+            }
+        } catch (error) {
+            // Continue to next selector
         }
-      }
-    } catch (error) {
-      // Continue to next selector
     }
-  }
-  return '';
+    return '';
 };
 
 /**
@@ -30,31 +30,29 @@ const tryExtractText = async (page, selectors) => {
  * @returns {Promise<string>} Converted text or empty string
  */
 const tryExtractHTML = async (page, selectors) => {
-  for (const selector of selectors) {
-    try {
-      const element = await page.$(selector);
-      if (element) {
-        const html = await page.evaluate(el => el.innerHTML, element);
-        if (html && html.trim()) {
-          const text = convert(html, {
-            wordwrap: 130,
-            preserveNewlines: true,
-            selectors: [
-              { selector: 'a', options: { ignoreHref: true } },
-              { selector: 'img', format: 'skip' }
-            ]
-          });
-          return text.trim();
-        }
-      }
-    } catch (error) {
-      // Continue to next selector
+    for (const selector of selectors) {
+        try {
+            const element = await page.$(selector);
+            if (element) {
+                const html = await page.evaluate(el => el.innerHTML, element);
+                if (html && html.trim()) {
+                    const text = convert(html, {
+                        wordwrap: 130,
+                        preserveNewlines: true,
+                        selectors: [
+                            { selector: 'a', options: { ignoreHref: true } },
+                            { selector: 'img', format: 'skip' }
+                        ]
+                    });
+                    return text.trim();
+                }
+            }
+        } catch (error) { }
     }
-  }
-  return '';
+    return '';
 };
 
 module.exports = {
-  tryExtractText,
-  tryExtractHTML
+    tryExtractText,
+    tryExtractHTML
 };

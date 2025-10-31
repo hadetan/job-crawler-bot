@@ -5,24 +5,19 @@ const { tryExtractText, tryExtractHTML } = require('./dom-helpers');
 const { formatJobToText, saveJobToFile } = require('./format-helpers');
 
 module.exports = {
-  // CSV utilities
-  readCSV,
-  normalizeURL,
+    readCSV,
+    normalizeURL,
 
-  // Logger
-  log,
+    log,
 
-  // File utilities
-  extractCompanyName,
-  getProcessedJobs,
-  markJobAsProcessed,
-  getNextJobNumber,
+    extractCompanyName,
+    getProcessedJobs,
+    markJobAsProcessed,
+    getNextJobNumber,
 
-  // DOM utilities
-  tryExtractText,
-  tryExtractHTML,
+    tryExtractText,
+    tryExtractHTML,
 
-  // Format utilities
-  formatJobToText,
-  saveJobToFile
+    formatJobToText,
+    saveJobToFile
 };
