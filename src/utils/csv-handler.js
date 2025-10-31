@@ -47,14 +47,19 @@ const writeCSV = (filePath, data, columns) => {
 };
 
 /**
- * Normalize URL for deduplication by extracting job ID
+ * Normalize URL for deduplication by including domain + job ID
  * @param {string} url - The URL to normalize
- * @returns {string} - Normalized form (job ID if found, else lowercased URL)
+ * @returns {string} - Normalized form (domain+jobID if found, else lowercased URL)
  *
  * Job URLs with same ID but different locales are deduplicated:
- * - stripe.com/us/jobs/listing/.../7176975 → "7176975"
- * - stripe.com/gb/jobs/listing/.../7176975 → "7176975"
+ * - stripe.com/us/jobs/listing/.../7176975 → "stripe.com:7176975"
+ * - stripe.com/gb/jobs/listing/.../7176975 → "stripe.com:7176975"
  * - Both map to same normalized form → deduplicated
+ *
+ * But different domains with same ID are NOT deduplicated:
+ * - roblox.com/jobs/6209414 → "roblox.com:6209414"
+ * - betterment.com/...?gh_jid=6209414 → "betterment.com:6209414"
+ * - Different normalized forms → kept separate
  *
  * URLs without job IDs fall back to standard normalization.
  */
@@ -62,6 +67,9 @@ const normalizeURL = (url) => {
   if (!url) return '';
 
   try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.replace(/^www\./, '').toLowerCase();
+    
     // Extract job ID (4+ consecutive digits) from entire URL
     const matches = url.match(/\d{4,}/g);
 
@@ -78,7 +86,8 @@ const normalizeURL = (url) => {
         return longest;
       });
 
-      return longestMatch;
+      // Include domain to prevent collisions across different companies
+      return `${hostname}:${longestMatch}`;
     }
   } catch {
     // Fall through to standard normalization

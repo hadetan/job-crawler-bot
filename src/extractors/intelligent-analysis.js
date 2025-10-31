@@ -168,8 +168,13 @@ const extractWithIntelligentAnalysis = async (page) => {
       // Now find content containers
       const containers = Array.from(workingBody.querySelectorAll('article, main, [role="main"], section, div'));
 
-      // Job-related keywords to boost score
-      const jobKeywords = ['responsibilities', 'requirements', 'qualifications', 'description', 'about the role', 'what you', 'your responsibilities', 'key qualifications'];
+      // Job-related keywords to boost score (expanded to catch more variations)
+      const jobKeywords = [
+        'responsibilities', 'requirements', 'qualifications', 'description',
+        'about the role', 'what you', 'your responsibilities', 'key qualifications',
+        'you will', 'you have', 'your role', 'about you', 'we are looking',
+        'ideal candidate', 'join', 'team', 'position', 'opportunity', 'experience'
+      ];
 
       let bestContainers = [];
       let maxScore = 0;
@@ -206,11 +211,9 @@ const extractWithIntelligentAnalysis = async (page) => {
         const lowerText = text.toLowerCase();
         const keywordCount = jobKeywords.filter(kw => lowerText.includes(kw)).length;
 
-        // Must have at least 1 job keyword to be considered
-        if (keywordCount === 0) continue;
-
-        // Calculate quality score
-        const score = textDensity * (1 + keywordCount * 2); // Higher weight on keywords
+        // Calculate quality score - no longer require keywords since other filters are strong
+        // Base score on text density, with keyword bonus if present
+        const score = textDensity * (1 + keywordCount * 0.5);
 
         if (score > maxScore * 0.7) {
           if (score > maxScore) {

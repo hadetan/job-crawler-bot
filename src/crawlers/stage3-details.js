@@ -28,12 +28,12 @@ const { validateExtractedContent } = require('../validators');
 const extractJobDetails = async (page, url) => {
   try {
     await page.goto(url, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle2',
       timeout: config.crawler.pageTimeout
     });
 
-    // Wait longer for dynamic content to load
-    await page.waitForTimeout(3000);
+    // Wait for dynamic content to load
+    await page.waitForTimeout(5000);
 
     const failureReasons = [];
 
@@ -81,7 +81,7 @@ const extractJobDetails = async (page, url) => {
 };
 
 /**
- * Process a single job URL
+ * Process a single job URL with retry logic
  * @param {Browser} browser - Puppeteer browser instance
  * @param {string} url - Job URL to process
  * @param {number} index - Index in processing queue
@@ -93,13 +93,26 @@ const extractJobDetails = async (page, url) => {
 const processJobURL = async (browser, url, index, total, jobsDir, stats) => {
   log.progress(`Processing job ${index + 1}/${total}: ${url}`);
 
-  const page = await browser.newPage();
+  const maxRetries = 3;
+  let lastError = null;
 
-  try {
-    await page.setUserAgent(config.crawler.userAgent);
-    await page.setViewport({ width: 1920, height: 1080 });
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const page = await browser.newPage();
 
-    const jobData = await extractJobDetails(page, url);
+    try {
+      await page.setUserAgent(config.crawler.userAgent);
+      await page.setViewport({ width: 1920, height: 1080 });
+      
+      // Disable HTTP/2 for problematic sites
+      await page.setExtraHTTPHeaders({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      });
+
+      const jobData = await extractJobDetails(page, url);
     const companyName = extractCompanyName(url);
     const companyDir = path.join(jobsDir, companyName);
 
@@ -119,25 +132,53 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats) => {
     if (jobData.source === 'structured-data') stats.structuredCount++;
     if (jobData.source === 'intelligent-analysis') stats.intelligentCount++;
 
-    log.info(`Extracted via ${jobData.source}`);
-    log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
-  } catch (error) {
+      log.info(`Extracted via ${jobData.source}`);
+      log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
+      
+      await page.close();
+      return; // Success - exit retry loop
+      
+    } catch (error) {
+      await page.close();
+      lastError = error;
+      
+      // Check if this is a retryable error
+      const isRetryable = 
+        error.message.includes('ERR_HTTP2_PROTOCOL_ERROR') ||
+        error.message.includes('ERR_CONNECTION') ||
+        error.message.includes('timeout') ||
+        error.message.includes('Navigation');
+      
+      if (isRetryable && attempt < maxRetries - 1) {
+        const delay = 2000 * Math.pow(2, attempt); // Exponential backoff
+        log.warning(`Attempt ${attempt + 1} failed for ${url}, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // Non-retryable error or final attempt
+      break;
+    }
+  }
+  
+  // All retries failed
+  if (lastError) {
     // Detailed error logging
-    if (error.message.includes('Failed to extract valid content')) {
-      log.error(`Validation failed for ${url}: ${error.message}`);
-    } else if (error.message.includes('Navigation') || error.message.includes('Timeout')) {
-      log.error(`Navigation timeout for ${url}: ${error.message}`);
+    if (lastError.message.includes('Failed to extract valid content')) {
+      log.error(`Validation failed for ${url}: ${lastError.message}`);
+    } else if (lastError.message.includes('Navigation') || lastError.message.includes('Timeout')) {
+      log.error(`Navigation timeout for ${url}: ${lastError.message}`);
+    } else if (lastError.message.includes('ERR_HTTP2_PROTOCOL_ERROR')) {
+      log.error(`HTTP/2 protocol error for ${url} (likely anti-bot protection)`);
     } else {
-      log.error(`Extraction failed for ${url}: ${error.message}`);
+      log.error(`Extraction failed for ${url}: ${lastError.message}`);
     }
 
     // Save failed URL for analysis
     const failedLogPath = path.join(jobsDir, 'failed_extractions.txt');
-    fs.appendFileSync(failedLogPath, `${url}\t${error.message}\n`, 'utf-8');
+    fs.appendFileSync(failedLogPath, `${url}\t${lastError.message}\n`, 'utf-8');
 
     stats.failedCount++;
-  } finally {
-    await page.close();
   }
 };
 
@@ -167,24 +208,38 @@ const runStage3 = async () => {
   const processedJobs = getProcessedJobs(jobsDir);
   let urlsToProcess = jobURLs.filter(url => !processedJobs.has(normalizeURL(url)));
 
+  log.info(`Total jobs in CSV: ${jobURLs.length}`);
+  log.info(`Already processed: ${processedJobs.size}`);
+  log.info(`New jobs to process: ${urlsToProcess.length}`);
+  
+  // Debug: show sample of filtered URLs
+  if (jobURLs.length > urlsToProcess.length) {
+    const skippedCount = jobURLs.length - urlsToProcess.length;
+    log.info(`Skipping ${skippedCount} already-processed URLs (showing first 5):`);
+    const skipped = jobURLs.filter(url => processedJobs.has(normalizeURL(url))).slice(0, 5);
+    skipped.forEach(url => {
+      log.info(`  ✓ ${url} [normalized: ${normalizeURL(url)}]`);
+    });
+  }
+
   if (urlsToProcess.length === 0) {
     log.info('Stage 3 complete: All jobs already processed');
     return;
   }
 
-  // Limit to 20 jobs for testing
-  const PROCESSING_LIMIT = 20;
-  if (urlsToProcess.length > PROCESSING_LIMIT) {
-    log.info(`Limiting to ${PROCESSING_LIMIT} jobs (found ${urlsToProcess.length} total)`);
-    urlsToProcess = urlsToProcess.slice(0, PROCESSING_LIMIT);
-  }
-
-  log.info(`Found ${urlsToProcess.length} new jobs to process`);
-
-  // Launch browser
+  // Launch browser with additional args to handle HTTP/2 protocol issues
   const browser = await puppeteer.launch({
     headless: config.crawler.headless,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-http2',  // Disable HTTP/2 to prevent ERR_HTTP2_PROTOCOL_ERROR
+      '--disable-blink-features=AutomationControlled',  // Hide automation
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process'
+    ],
+    ignoreHTTPSErrors: true
   });
 
   // Initialize statistics

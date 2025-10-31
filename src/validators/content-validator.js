@@ -59,8 +59,8 @@ const validateExtractedContent = (jobData) => {
     return { valid: false, reason: 'Description is empty or placeholder' };
   }
 
-  if (description.length < 200) {
-    return { valid: false, reason: 'Description too short (< 200 characters)' };
+  if (description.length < 100) {
+    return { valid: false, reason: 'Description too short (< 100 characters)' };
   }
 
   // Check for 404 error text in description
@@ -78,7 +78,7 @@ const validateExtractedContent = (jobData) => {
     }
   }
 
-  // Check for job-related keywords (must have at least 2)
+  // Check for job-related keywords (must have at least 1)
   const jobKeywords = [
     'experience',
     'responsibilities',
@@ -86,14 +86,19 @@ const validateExtractedContent = (jobData) => {
     'qualifications',
     'skills',
     'role',
-    'position'
+    'position',
+    'you will',
+    'you have',
+    'we are looking',
+    'team',
+    'opportunity'
   ];
 
   const lowerDesc = description.toLowerCase();
   const keywordCount = jobKeywords.filter(kw => lowerDesc.includes(kw)).length;
 
-  if (keywordCount < 2) {
-    return { valid: false, reason: 'Description does not contain enough job-related keywords' };
+  if (keywordCount < 1) {
+    return { valid: false, reason: 'Description does not contain job-related keywords' };
   }
 
   return { valid: true, reason: null };
