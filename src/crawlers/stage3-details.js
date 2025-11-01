@@ -18,7 +18,7 @@ const {
     extractWithIntelligentAnalysis
 } = require('../extractors');
 const { validateExtractedContent } = require('../validators');
-const { extractJobLinks } = require('../utils/job-links');
+const { extractJobLinks, isJobDetailPage } = require('../utils/job-links');
 
 /**
  * Extract job details from a single URL using multi-layer extraction approach
@@ -218,12 +218,13 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
         let handledViaListing = false;
         let listingFound = 0;
         let listingSuccesses = 0;
+        let newLinksCount = 0;
 
         try {
             if (depth < 1) {
                 const page = await browser.newPage();
                 try {
-const links = await extractJobLinks(page, url, { waitUntil: 'networkidle2' });
+                    const links = await extractJobLinks(page, url, { waitUntil: 'networkidle2' });
                     listingFound = Array.isArray(links) ? links.length : 0;
                     await page.close();
 
@@ -233,16 +234,20 @@ const links = await extractJobLinks(page, url, { waitUntil: 'networkidle2' });
                             .filter(nu => !processedSet.has(nu));
                         const cap = config.crawler.listingFollowLimit || 30;
                         const toFollow = uniqueLinks.slice(0, cap).map(nu => links.find(l => normalizeURL(l) === nu));
+                        newLinksCount = toFollow.length;
 
-                        if (toFollow.length > 0) {
-                            log.info(`Detected listing page. Following ${toFollow.length} job links (depth 1).`);
-                            const before = stats.successCount;
-                            for (const link of toFollow) {
-                                await processJobURL(browser, link, 0, toFollow.length, jobsDir, stats, { depth: depth + 1 });
-                            }
-                            listingSuccesses = stats.successCount - before;
-                            handledViaListing = listingSuccesses > 0;
+                        if (newLinksCount === 0) {
+                            log.info(`Detected listing page but no new job links. Skipping.`);
+                            return; // No new work to do; don't record as failure
                         }
+
+                        log.info(`Detected listing page. Following ${newLinksCount} new job links (depth 1).`);
+                        const before = stats.successCount;
+                        for (const link of toFollow) {
+                            await processJobURL(browser, link, 0, toFollow.length, jobsDir, stats, { depth: depth + 1 });
+                        }
+                        listingSuccesses = stats.successCount - before;
+                        handledViaListing = listingSuccesses > 0;
                     }
                 } catch (e) {
                     try { await page.close(); } catch (_) {}
@@ -254,10 +259,15 @@ const links = await extractJobLinks(page, url, { waitUntil: 'networkidle2' });
             return; // Do not record original URL as failed if we extracted from its listing
         }
 
+        // If listing was detected but there were no new links, we already skipped above
+        if (listingFound > 0 && newLinksCount === 0) {
+            return;
+        }
+
         // Otherwise, record failure with context
         const reason = lastError.message || 'Unknown extraction error';
         if (listingFound > 0 && listingSuccesses === 0) {
-            log.error(`Listing detected at ${url} but no job details extracted from its links.`);
+            log.error(`Listing detected at ${url} but no job details extracted from its new links.`);
         } else if (listingFound === 0) {
             if (reason.includes('Failed to extract valid content')) {
                 log.error(`Validation failed for ${url}: ${reason}`);
@@ -271,7 +281,7 @@ const links = await extractJobLinks(page, url, { waitUntil: 'networkidle2' });
         }
 
         const failedLogPath = path.join(jobsDir, 'failed_extractions.txt');
-        const contextMsg = listingFound > 0 ? `Listing page detected; links found=${listingFound}, successes=${listingSuccesses}` : reason;
+        const contextMsg = listingFound > 0 ? `Listing page detected; new_links_found=${newLinksCount}, successes=${listingSuccesses}` : reason;
         fs.appendFileSync(failedLogPath, `${url}\t${contextMsg}\n`, 'utf-8');
 
         stats.failedCount++;
