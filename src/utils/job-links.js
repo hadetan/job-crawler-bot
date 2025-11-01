@@ -1,0 +1,218 @@
+const config = require('../config');
+const log = require('./logger');
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const ATS_HOSTS = [
+    'greenhouse.io',
+    'job-boards.greenhouse.io',
+    'boards.greenhouse.io',
+    'lever.co',
+    'ashbyhq.com',
+    'workday.com',
+    'myworkdayjobs.com',
+    'workdayjobs.com'
+];
+
+const getRootDomain = (hostname) => {
+    if (!hostname) return '';
+    const parts = hostname.split('.').filter(Boolean);
+    if (parts.length <= 2) return hostname;
+    return parts.slice(-2).join('.');
+};
+
+const isATSHost = (hostname) => {
+    if (!hostname) return false;
+    return ATS_HOSTS.some(d => hostname === d || hostname.endsWith('.' + d));
+};
+
+const isValidJobURL = (url) => {
+    if (!url) return false;
+    if (url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:')) {
+        return false;
+    }
+    try {
+        new URL(url);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+/**
+ * Extract numeric job ID (4+ digits) from URL
+ * @param {string} url - The URL to extract job ID from
+ * @returns {string|null} - Job ID as string, or null if not found
+ */
+const extractJobId = (url) => {
+    if (!url) return null;
+
+    try {
+        const matches = url.match(/\d{4,}/g);
+
+        if (!matches || matches.length === 0) {
+            return null;
+        }
+
+        const longestMatch = matches.reduce((longest, current) => {
+            if (current.length > longest.length) {
+                return current;
+            } else if (current.length === longest.length) {
+                return current;
+            }
+            return longest;
+        });
+
+        return longestMatch;
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * Check if URL is a job detail page
+ * @param {string} url - The URL to check
+ * @returns {boolean} - True if URL is a job detail page
+ */
+const isJobDetailPage = (url) => {
+    try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname.toLowerCase();
+        const pathname = urlObj.pathname.toLowerCase();
+        const search = urlObj.search.toLowerCase();
+        const params = urlObj.searchParams;
+
+        // Generic job-board signal: Greenhouse job id in query
+        if (params.has('gh_jid')) {
+            return true;
+        }
+
+        if (isATSHost(hostname)) {
+            if (pathname.includes('/jobs/') || pathname.includes('/job/') || pathname.includes('/job_app')) {
+                return true;
+            }
+        }
+
+        const excludePatterns = [
+            /\/careers\/?$/,           // Ends with /careers/ or /careers
+            /\/jobs\/?$/,              // Ends with /jobs/ or /jobs
+            /\/career\/?$/,            // Ends with /career/ or /career
+            /\/(faqs?|about|team|benefits|culture|life|perks|diversity|contact|early-careers)[\/?]/,
+            /life-as/,                 // Blog/life stories pages
+            /our-entrepreneurs/,       // Team/entrepreneur pages
+            /episodes\//,              // Blog episodes
+            /#job-board/,              // Hash fragments to job boards
+            /open-positions\/?$/,      // Generic "open positions" page
+            /\/[a-z]{2}\/.*careers\/?$/,  // Localized pages ending in careers (e.g., /pt/careers/)
+            /\/apply\/?$/,             // Application forms (when /apply is at the end)
+            /\/(search|all|university)\/?$/,  // Search, "view all", university pages
+            /\/departments?\/?$/,      // Department listing pages
+            /\/(chicago|dublin|tokyo|london|munich|new-york|san-francisco|paris|reykjavik|sydney|singapore|vancouver|warsaw|nyc|sf|la|boston|seattle|austin|denver|atlanta|miami|dallas|houston|phoenix|portland|philadelphia|berlin|amsterdam|barcelona|madrid|rome|milan|stockholm|oslo|copenhagen|helsinki|zurich|vienna|brussels|lisbon|prague|budapest|toronto|montreal|melbourne|bangalore|mumbai|delhi|shanghai|beijing|hong-kong|seoul|taipei)\/?$/i,
+            /\/(business|engineering|product|internal|design|marketing|sales|support|operations|finance|legal|data|security|infrastructure|research|university-recruiting|internship)\/?$/i  // Department/team filter pages
+        ];
+
+        for (const pattern of excludePatterns) {
+            if (pattern.test(pathname) || pattern.test(search)) {
+                return false;
+            }
+        }
+
+        // Generic numeric id: only accept when URL hints job context
+        const jobId = extractJobId(url);
+        if (jobId !== null) {
+            const positiveSignals = [
+                /\bjob(s)?\b/,
+                /\bcareer(s)?\b/,
+                /open-positions/,
+                /position(s)?/,
+                /opportunit(y|ies)/
+            ];
+            const hay = pathname + ' ' + search;
+            if (positiveSignals.some(r => r.test(hay))) {
+                return true;
+            }
+        }
+        return false;
+    } catch {
+        return false;
+    }
+};
+
+const extractJobLinks = async (page, url, retryOrOpts = 0) => {
+    const retryCount = typeof retryOrOpts === 'number' ? retryOrOpts : (retryOrOpts.retryCount || 0);
+    const waitUntil = typeof retryOrOpts === 'object' && retryOrOpts.waitUntil ? retryOrOpts.waitUntil : 'domcontentloaded';
+
+    try {
+        await page.goto(url, {
+            waitUntil,
+            timeout: config.crawler.pageTimeout
+        });
+
+        await page.waitForTimeout(1000);
+
+        let links = [];
+
+        for (const selector of config.selectors.jobLinks) {
+            try {
+                const hrefs = await page.$$eval(selector, anchors =>
+                    anchors.map(a => a.href).filter(Boolean)
+                );
+                links.push(...hrefs);
+            } catch (error) { }
+        }
+
+        // Generic fallback: if selectors found nothing, scan all anchors
+        if (links.length === 0) {
+            try {
+                const allHrefs = await page.$$eval('a', anchors => anchors.map(a => a.href).filter(Boolean));
+                links.push(...allHrefs);
+            } catch (error) { }
+        }
+
+        const baseHost = new URL(url).hostname.toLowerCase();
+        const baseRoot = getRootDomain(baseHost);
+
+        const normalized = links
+            .filter(isValidJobURL)
+            .map(link => {
+                try {
+                    return new URL(link, url).href;
+                } catch {
+                    return null;
+                }
+            })
+            .filter(Boolean);
+
+        const hostFiltered = normalized.filter(href => {
+            try {
+                const h = new URL(href).hostname.toLowerCase();
+                if (isATSHost(h)) return true;
+                const root = getRootDomain(h);
+                return root === baseRoot;
+            } catch {
+                return false;
+            }
+        });
+
+        const validLinks = hostFiltered.filter(isJobDetailPage);
+
+        return Array.from(new Set(validLinks));
+    } catch (error) {
+        if ((typeof retryOrOpts === 'number' ? retryOrOpts : retryOrOpts.retryCount || 0) < config.retry.maxRetries) {
+            const nextRetry = retryCount + 1;
+            const delay = config.retry.retryDelay * nextRetry;
+            log.progress(`Failed to load ${url}, retrying in ${delay}ms... (Attempt ${nextRetry}/${config.retry.maxRetries})`);
+            await sleep(delay);
+            return extractJobLinks(page, url, { retryCount: nextRetry, waitUntil });
+        }
+
+        throw error;
+    }
+};
+
+module.exports = {
+    isValidJobURL,
+    extractJobId,
+    isJobDetailPage,
+    extractJobLinks
+};
