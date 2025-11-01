@@ -25,7 +25,7 @@ const validateInputFile = (filePath, stageName) => {
     }
 };
 
-const main = async () => {
+(async () => {
     const startTime = Date.now();
 
     try {
@@ -57,6 +57,4 @@ const main = async () => {
         log.error(`Fatal error: ${error.message}`);
         process.exit(1);
     }
-};
-
-main();
+})();

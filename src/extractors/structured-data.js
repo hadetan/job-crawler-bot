@@ -81,6 +81,48 @@ const extractFromStructuredData = async (page) => {
             }
         }
 
+        // Fallback for Greenhouse job board pages that expose data via window.__remixContext
+        try {
+            const gh = await page.evaluate(() => {
+                const ctx = window.__remixContext;
+                if (!ctx || !ctx.state || !ctx.state.loaderData) return null;
+                const data = ctx.state.loaderData;
+                for (const key of Object.keys(data)) {
+                    const node = data[key];
+                    if (node && node.jobPost && node.jobPost.title) {
+                        const jp = node.jobPost;
+                        return {
+                            title: jp.title || '',
+                            introduction: jp.introduction || '',
+                            content: jp.content || '',
+                            conclusion: jp.conclusion || '',
+                            location: jp.job_post_location || 'Not specified'
+                        };
+                    }
+                }
+                return null;
+            });
+
+            if (gh) {
+                const htmlCombined = `${gh.introduction}\n${gh.content}\n${gh.conclusion}`;
+                const description = convert(htmlCombined || '', {
+                    wordwrap: 130,
+                    preserveNewlines: true,
+                    selectors: [
+                        { selector: 'a', options: { ignoreHref: true } },
+                        { selector: 'img', format: 'skip' }
+                    ]
+                }).trim();
+
+                return {
+                    title: (gh.title || '').trim(),
+                    description,
+                    location: (gh.location || 'Not specified').trim(),
+                    skills: []
+                };
+            }
+        } catch (_) { /* ignore */ }
+
         return null;
     } catch (error) {
         return null;
