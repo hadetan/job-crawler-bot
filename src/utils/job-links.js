@@ -108,7 +108,13 @@ const isJobDetailPage = (url) => {
             /\/(search|all|university)\/?$/,  // Search, "view all", university pages
             /\/departments?\/?$/,      // Department listing pages
             /\/(chicago|dublin|tokyo|london|munich|new-york|san-francisco|paris|reykjavik|sydney|singapore|vancouver|warsaw|nyc|sf|la|boston|seattle|austin|denver|atlanta|miami|dallas|houston|phoenix|portland|philadelphia|berlin|amsterdam|barcelona|madrid|rome|milan|stockholm|oslo|copenhagen|helsinki|zurich|vienna|brussels|lisbon|prague|budapest|toronto|montreal|melbourne|bangalore|mumbai|delhi|shanghai|beijing|hong-kong|seoul|taipei)\/?$/i,
-            /\/(business|engineering|product|internal|design|marketing|sales|support|operations|finance|legal|data|security|infrastructure|research|university-recruiting|internship)\/?$/i  // Department/team filter pages
+            /\/(business|engineering|product|internal|design|marketing|sales|support|operations|finance|legal|data|security|infrastructure|research|university-recruiting|internship)\/?$/i,  // Department/team filter pages
+            /job-opening-list/,        // Job listing pages
+            /job-openings/,            // Job listing pages
+            /\.(jpg|jpeg|png|gif|svg|webp|pdf|doc|docx)$/i,  // File extensions (images, documents)
+            /[\/?]page=/i,             // Pagination parameters
+            /\/gallery/i,              // Gallery pages
+            /\/photos?/i               // Photo pages
         ];
 
         for (const pattern of excludePatterns) {
@@ -117,7 +123,7 @@ const isJobDetailPage = (url) => {
             }
         }
 
-        // Generic numeric id: only accept when URL hints job context
+        // Require a numeric job ID (4+ digits) and positive job signals in path/query
         const jobId = extractJobId(url);
         if (jobId !== null) {
             const positiveSignals = [
@@ -169,9 +175,6 @@ const extractJobLinks = async (page, url, retryOrOpts = 0) => {
             } catch (error) { }
         }
 
-        const baseHost = new URL(url).hostname.toLowerCase();
-        const baseRoot = getRootDomain(baseHost);
-
         const normalized = links
             .filter(isValidJobURL)
             .map(link => {
@@ -183,18 +186,7 @@ const extractJobLinks = async (page, url, retryOrOpts = 0) => {
             })
             .filter(Boolean);
 
-        const hostFiltered = normalized.filter(href => {
-            try {
-                const h = new URL(href).hostname.toLowerCase();
-                if (isATSHost(h)) return true;
-                const root = getRootDomain(h);
-                return root === baseRoot;
-            } catch {
-                return false;
-            }
-        });
-
-        const validLinks = hostFiltered.filter(isJobDetailPage);
+        const validLinks = normalized.filter(isJobDetailPage);
 
         return Array.from(new Set(validLinks));
     } catch (error) {
