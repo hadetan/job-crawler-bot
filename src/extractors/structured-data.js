@@ -47,8 +47,7 @@ const extractFromStructuredData = async (page) => {
                             { selector: 'img', format: 'skip' }
                         ]
                     }).trim();
-                    
-                    // Clean the description
+
                     description = cleanDescription(description);
                 }
 

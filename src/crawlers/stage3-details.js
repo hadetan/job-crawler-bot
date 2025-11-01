@@ -11,10 +11,6 @@ const {
 } = require('../utils');
 const processJobURL = require('../utils/process-job-url');
 
-/**
- * Main function to run Stage 3: Job Details Extraction
- * @returns {Promise<void>}
- */
 const runStage3 = async () => {
     log.info('Starting Stage 3: Job Details Extractor...');
 
