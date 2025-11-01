@@ -85,7 +85,12 @@ const validateExtractedContent = (jobData) => {
         'you have',
         'we are looking',
         'team',
-        'opportunity'
+        'opportunity',
+        'work',
+        'join',
+        'apply',
+        'salary',
+        'career'
     ];
 
     const lowerDesc = description.toLowerCase();

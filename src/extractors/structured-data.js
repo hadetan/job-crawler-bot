@@ -1,4 +1,5 @@
 const { convert } = require('html-to-text');
+const cleanDescription = require('../utils/description-cleaner');
 
 /**
  * Extract job data from JSON-LD structured data (Schema.org JobPosting)
@@ -46,6 +47,9 @@ const extractFromStructuredData = async (page) => {
                             { selector: 'img', format: 'skip' }
                         ]
                     }).trim();
+                    
+                    // Clean the description
+                    description = cleanDescription(description);
                 }
 
                 // Extract location
@@ -116,7 +120,7 @@ const extractFromStructuredData = async (page) => {
 
                 return {
                     title: (gh.title || '').trim(),
-                    description,
+                    description: cleanDescription(description),
                     location: (gh.location || 'Not specified').trim(),
                     skills: []
                 };

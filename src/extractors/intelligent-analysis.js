@@ -1,4 +1,5 @@
 const { convert } = require('html-to-text');
+const cleanDescription = require('../utils/description-cleaner');
 
 /**
  * Extract job data using intelligent DOM analysis
@@ -133,99 +134,172 @@ const extractWithIntelligentAnalysis = async (page) => {
             return bestHeading || '';
         });
 
-        // Step 3: Extract description intelligently
+        // Step 3: Extract description intelligently using hybrid algorithm
         const description = await page.evaluate(() => {
-            const removeSelectors = [
+            // Helper function to calculate text length of an element
+            const getTextLength = (element) => {
+                return (element.textContent || '').trim().length;
+            };
+
+            // Helper function to check if element contains boundary markers
+            const hasBoundaryMarker = (element) => {
+                const text = (element.textContent || '').toLowerCase();
+                const boundaryPatterns = [
+                    'equal opportunity employer',
+                    'we do not discriminate',
+                    'privacy policy',
+                    'cookie policy',
+                    'apply now',
+                    'submit application',
+                    'have questions',
+                    'want to learn more',
+                    'by entering your email',
+                    'message and data rates',
+                    'your privacy choices',
+                    'terms of use',
+                    'cookie settings'
+                ];
+                
+                return boundaryPatterns.some(pattern => text.includes(pattern));
+            };
+
+            // Helper to check if element looks like job listings/cards
+            const looksLikeJobListing = (element) => {
+                const text = element.textContent || '';
+                const textLength = text.trim().length;
+                
+                // Count indicators of job listings
+                const viewJobCount = (text.match(/view job/gi) || []).length;
+                const applyCount = (text.match(/apply/gi) || []).length;
+                
+                // If many "View Job" links with short average text per link, it's a listing
+                if (viewJobCount >= 3 && textLength / viewJobCount < 400) return true;
+                
+                // Check if labeled as "related jobs" or "similar"
+                const lowerText = text.toLowerCase();
+                if ((lowerText.includes('related jobs') || lowerText.includes('similar jobs') || 
+                     lowerText.includes('other opportunities')) && textLength < 1500) {
+                    return true;
+                }
+                
+                return false;
+            };
+
+            // Step 1: Clone body and remove noise elements
+            const workingBody = document.body.cloneNode(true);
+            
+            const noiseSelectors = [
                 'nav',
                 'header',
                 'footer',
+                'iframe',
                 '[role="navigation"]',
+                '[role="banner"]',
+                '[role="contentinfo"]',
                 '[class*="nav"]',
                 '[class*="menu"]',
                 '[class*="header"]',
                 '[class*="footer"]',
                 '[class*="sidebar"]',
+                '[class*="cookie"]',
+                '[class*="consent"]',
                 '[aria-label*="navigation"]',
-                '[aria-label*="menu"]'
+                '[aria-label*="menu"]',
+                'script',
+                'style',
+                'noscript'
             ];
-
-            const workingBody = document.body.cloneNode(true);
-
-            removeSelectors.forEach(selector => {
+            
+            noiseSelectors.forEach(selector => {
                 workingBody.querySelectorAll(selector).forEach(el => el.remove());
             });
 
-            const containers = Array.from(workingBody.querySelectorAll('article, main, [role="main"], section, div'));
-
-            const jobKeywords = [
-                'responsibilities', 'requirements', 'qualifications', 'description',
-                'about the role', 'what you', 'your responsibilities', 'key qualifications',
-                'you will', 'you have', 'your role', 'about you', 'we are looking',
-                'ideal candidate', 'join', 'team', 'position', 'opportunity', 'experience'
-            ];
-
-            let bestContainers = [];
-            let maxScore = 0;
-
-            for (const container of containers) {
-                const text = container.textContent || '';
-                const textLength = text.trim().length;
-
-                if (textLength < 300) continue;
-
-                const listItems = container.querySelectorAll('li');
-                if (listItems.length > 20) continue;
-
-                const childCount = container.querySelectorAll('*').length || 1;
-                const textDensity = textLength / childCount;
-
-                if (textDensity < 5) continue;
-
-                const links = container.querySelectorAll('a');
-                const linkCount = links.length;
-                const linkText = Array.from(links).reduce((sum, link) => sum + (link.textContent || '').length, 0);
-                const linkRatio = textLength > 0 ? linkText / textLength : 0;
-
-                if (linkRatio > 0.3 || linkCount > 10) continue;
-
-                const lowerText = text.toLowerCase();
-                const keywordCount = jobKeywords.filter(kw => lowerText.includes(kw)).length;
-
-                // Calculate quality score - no longer require keywords since other filters are strong
-                const score = textDensity * (1 + keywordCount * 0.5);
-
-                if (score > maxScore * 0.7) {
-                    if (score > maxScore) {
-                        maxScore = score;
-                    }
-                    bestContainers.push({ container, score });
-                }
+            // Step 2: Find the main content container
+            let mainContainer = workingBody.querySelector('main, article, [role="main"]');
+            
+            if (!mainContainer) {
+                // Fallback: use body if no semantic container found
+                mainContainer = workingBody;
             }
 
-            bestContainers.sort((a, b) => b.score - a.score);
+            // Step 3: Find all semantic containers and evaluate them
+            const SEMANTIC_TAGS = ['section', 'article', 'div'];
+            const allContainers = Array.from(mainContainer.querySelectorAll(SEMANTIC_TAGS.join(', ')));
+            
+            // Add the main container itself as a candidate
+            allContainers.push(mainContainer);
 
-            const uniqueContainers = [];
-            for (const candidate of bestContainers) {
+            // Score each container
+            const scoredContainers = [];
+            for (const container of allContainers) {
+                const textLength = getTextLength(container);
+                
+                // Skip if too short
+                if (textLength < 300) continue;
+                
+                // Calculate penalties
+                let penalty = 0;
+                
+                // Penalty for job listings
+                if (looksLikeJobListing(container)) {
+                    penalty += 10000; // Heavy penalty
+                }
+                
+                // Penalty for boundary markers
+                if (hasBoundaryMarker(container)) {
+                    penalty += 5000;
+                }
+                
+                // Penalty for excessive links
+                const links = container.querySelectorAll('a');
+                const linkRatio = links.length / Math.max(1, textLength / 100);
+                if (linkRatio > 2) {
+                    penalty += 2000;
+                }
+                
+                // Check if nested in another container
                 let isNested = false;
-                for (const existing of uniqueContainers) {
-                    if (existing.container.contains(candidate.container)) {
+                for (const other of allContainers) {
+                    if (other !== container && other.contains(container)) {
                         isNested = true;
                         break;
                     }
-                    if (candidate.container.contains(existing.container)) {
-                        const index = uniqueContainers.indexOf(existing);
-                        uniqueContainers.splice(index, 1);
-                        break;
-                    }
                 }
-                if (!isNested) {
-                    uniqueContainers.push(candidate);
+                
+                // Score = text length - penalties
+                // We want long text with low penalties
+                const score = textLength - penalty;
+                
+                if (score > 0 && !isNested) {
+                    scoredContainers.push({ container, score, textLength, penalty });
                 }
             }
 
-            const topContainer = uniqueContainers.length > 0 ? uniqueContainers[0].container : null;
+            // Remove nested containers - keep only top-level
+            const topLevelContainers = [];
+            for (const candidate of scoredContainers) {
+                let hasParentInList = false;
+                for (const other of scoredContainers) {
+                    if (other.container !== candidate.container && 
+                        other.container.contains(candidate.container)) {
+                        hasParentInList = true;
+                        break;
+                    }
+                }
+                
+                if (!hasParentInList) {
+                    topLevelContainers.push(candidate);
+                }
+            }
 
-            return topContainer ? topContainer.innerHTML : '';
+            // Sort by score (highest first)
+            topLevelContainers.sort((a, b) => b.score - a.score);
+            
+            // Take the best container
+            const best = topLevelContainers[0];
+            const bestContainer = best ? best.container : mainContainer;
+
+            return bestContainer.innerHTML || '';
         });
 
         const descriptionText = description ? convert(description, {
@@ -236,6 +310,9 @@ const extractWithIntelligentAnalysis = async (page) => {
                 { selector: 'img', format: 'skip' }
             ]
         }).trim() : '';
+
+        // Clean the description to remove trailing boilerplate
+        const cleanedDescription = cleanDescription(descriptionText);
 
         // Step 4: Extract location
         const location = await page.evaluate(() => {
@@ -343,7 +420,7 @@ const extractWithIntelligentAnalysis = async (page) => {
 
         return {
             title: title.trim(),
-            description: descriptionText,
+            description: cleanedDescription,
             location: location.trim(),
             skills
         };
