@@ -78,15 +78,15 @@
 **So that** I don't waste API quota re-fetching successful pages
 
 ### Acceptance Criteria:
-- [ ] On startup, check if `report.json` exists for the given request ID
-- [ ] If exists and `--clean` NOT provided:
-  - [ ] Find first page with `status: false`
-  - [ ] Resume crawling from that page number
-  - [ ] Increment `retryCount` for that page on retry
-  - [ ] Display: `"Resuming from page {X} where previous run failed"`
-- [ ] If all pages have `status: true`:
-  - [ ] Display: `"All pages already completed successfully for request ID {id}. Use --clean to start fresh."`
-  - [ ] Exit without crawling
+- [x] On startup, check if `report.json` exists for the given request ID
+- [x] If exists and `--clean` NOT provided:
+  - [x] Find first page with `status: false`
+  - [x] Resume crawling from that page number
+  - [x] Increment `retryCount` for that page on retry
+  - [x] Display: `"Resuming from page {X} where previous run failed"`
+- [x] If all pages have `status: true`:
+  - [x] Display: `"All pages already completed successfully for request ID {id}. Use --clean to start fresh."`
+  - [x] Exit without crawling
 
 ---
 
@@ -163,11 +163,11 @@
 **So that** I understand the crawler's state and actions
 
 ### Acceptance Criteria:
-- [ ] Display on fresh run: `"Starting new Stage 1 run with request ID: {id}"`
-- [ ] Display on auto-ID: `"No ID provided. Generated request ID: {id}"`
-- [ ] Display progress: `"Fetching page {X} of {max}..."`
-- [ ] Display on success: `"Page {X} completed: {count} URLs found"`
-- [ ] Display final summary:
+- [x] Display on fresh run: `"Starting new Stage 1 run with request ID: {id}"`
+- [x] Display on auto-ID: `"No ID provided. Generated request ID: {id}"`
+- [x] Display progress: `"Fetching page {X} of {max}..."`
+- [x] Display on success: `"Page {X} completed: {count} URLs found"`
+- [x] Display final summary:
   ```
   ✅ Stage 1 complete for request ID: {id}
   Total pages processed: {count}

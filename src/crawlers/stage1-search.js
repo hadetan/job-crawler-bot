@@ -69,13 +69,29 @@ const runStage1 = async (options = {}) => {
 
     const report = loadReport(reportPath);
 
+    // Resume from checkpoint - The page number where it failed, resume from there
+    let startPage = 1;
+    const firstFailedPage = report.google_report.find(p => p.status === false);
+
+    if (firstFailedPage) {
+        startPage = firstFailedPage.page;
+        log.info(`Resuming from page ${startPage} where previous run failed`);
+    } else if (report.google_report.length > 0) {
+        const lastSuccessfulPage = Math.max(...report.google_report.map(p => p.page));
+        if (lastSuccessfulPage >= config.crawler.maxPages) {
+            log.info(`All pages already completed successfully for request ID ${requestId}. Use --clean to start fresh.`);
+            return;
+        }
+        startPage = lastSuccessfulPage + 1;
+    }
+
     const existingUrlsInCsv = getExistingUrlsFromCsv(csvPath);
 
     const newRows = [];
     let totalFound = 0;
     let duplicatesSkipped = 0;
 
-    for (let page = 1; page <= config.crawler.maxPages; page++) {
+    for (let page = startPage; page <= config.crawler.maxPages; page++) {
         const startIndex = (page - 1) * 10 + 1;
         log.progress(`Fetching page ${page} of ${config.crawler.maxPages}...`);
 
@@ -90,6 +106,9 @@ const runStage1 = async (options = {}) => {
                 retryCount: 0
             };
             report.google_report.push(pageReport);
+        } else if (isRetry) {
+            // Increment retry
+            pageReport.retryCount += 1;
         }
 
         try {
