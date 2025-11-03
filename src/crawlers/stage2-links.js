@@ -6,7 +6,13 @@ const config = require('../config');
 const { readCSV, writeCSV, normalizeURL } = require('../utils/csv-handler');
 const log = require('../utils/logger');
 const { extractJobLinks } = require('../utils/job-links');
-const { generateRequestId } = require('../utils/request-helpers');
+const { 
+    generateRequestId, 
+    setupJobLinksFolder,
+    jobIdExists,
+    loadReport,
+    saveReport
+} = require('../utils/request-helpers');
 
 const runStage2 = async (options = {}) => {
     log.info('Starting Stage 2: Job Listing Page Crawler...');
@@ -35,10 +41,17 @@ const runStage2 = async (options = {}) => {
         jobId = generateRequestId();
         log.info(`No jobId provided. Generated jobId: ${jobId}`);
     } else {
-        log.info(`Starting Stage 2 with jobId: ${jobId}, reading from requestId: ${options.runId}`);
+        if (jobIdExists(config.output.dir, jobId)) {
+            log.info(`Using existing jobId: ${jobId}`);
+        } else {
+            log.info(`Starting Stage 2 with jobId: ${jobId}, reading from requestId: ${options.runId}`);
+        }
     }
 
-    log.info(`Reading job board URLs from requestId: ${options.runId}`);
+    const { jobLinksDir, jobsCsvPath, reportPath } = setupJobLinksFolder(config.output.dir, jobId);
+    log.info(`Starting Stage 2 with jobId: ${jobId}, reading from requestId: ${options.runId}\nJob links folder: ${jobLinksDir}`);
+
+    const report = loadReport(reportPath);
 
     const inputFile = path.join(config.output.dir, 'urls.csv');
     const outputFile = path.join(config.output.dir, 'jobs.csv');

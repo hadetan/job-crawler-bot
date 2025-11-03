@@ -15,7 +15,7 @@ const generateRequestId = () => {
  * @param {string} requestId - Request ID for this run
  * @returns {object} Object containing paths to CSV and JSON files
  */
-const setupRequestFolder = (outputDir, requestId) => {
+const setupJobBoardsFolder = (outputDir, requestId) => {
     const requestDir = path.join(outputDir, 'job_boards', requestId);
     const csvPath = path.join(requestDir, 'google-results.csv');
     const reportPath = path.join(requestDir, 'report.json');
@@ -143,12 +143,59 @@ const getExistingUrlsFromCsv = (csvPath) => {
     return urls;
 };
 
+/**
+ * Setup job links folder structure for Stage 2 and initialize files
+ * @param {string} outputDir - Base output directory
+ * @param {string} jobId - Job ID for this Stage 2 run
+ * @returns {object} Object containing paths to jobs CSV and report JSON
+ */
+const setupJobLinksFolder = (outputDir, jobId) => {
+    const jobLinksDir = path.join(outputDir, 'job_links', jobId);
+    const jobsCsvPath = path.join(jobLinksDir, 'jobs.csv');
+    const reportPath = path.join(jobLinksDir, 'report.json');
+
+    if (!fs.existsSync(jobLinksDir)) {
+        fs.mkdirSync(jobLinksDir, { recursive: true });
+    }
+
+    if (!fs.existsSync(reportPath)) {
+        const initialReport = {
+            link_extraction_report: {}
+        };
+        fs.writeFileSync(reportPath, JSON.stringify(initialReport, null, 2), 'utf-8');
+    }
+
+    if (!fs.existsSync(jobsCsvPath)) {
+        const csvHeaders = 'URL,STATUS,REMARKS,FILENAME\n';
+        fs.writeFileSync(jobsCsvPath, csvHeaders, 'utf-8');
+    }
+
+    return {
+        jobLinksDir,
+        jobsCsvPath,
+        reportPath
+    };
+};
+
+/**
+ * Check if a job ID folder exists
+ * @param {string} outputDir - Base output directory
+ * @param {string} jobId - Job ID to check
+ * @returns {boolean} True if folder exists
+ */
+const jobIdExists = (outputDir, jobId) => {
+    const jobLinksDir = path.join(outputDir, 'job_links', jobId);
+    return fs.existsSync(jobLinksDir);
+};
+
 module.exports = {
     generateRequestId,
-    setupRequestFolder,
+    setupJobBoardsFolder,
     loadReport,
     saveReport,
     requestIdExists,
     appendToGoogleResultsCsv,
-    getExistingUrlsFromCsv
+    getExistingUrlsFromCsv,
+    setupJobLinksFolder,
+    jobIdExists
 };

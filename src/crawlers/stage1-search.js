@@ -3,7 +3,7 @@ const config = require('../config');
 const log = require('../utils/logger');
 const {
     generateRequestId,
-    setupRequestFolder,
+    setupJobBoardsFolder,
     loadReport,
     saveReport,
     requestIdExists,
@@ -62,7 +62,7 @@ const runStage1 = async (options = {}) => {
         }
     }
 
-    const { requestDir, csvPath, reportPath } = setupRequestFolder(config.output.dir, requestId);
+    const { requestDir, csvPath, reportPath } = setupJobBoardsFolder(config.output.dir, requestId);
     log.info(`Request folder: ${requestDir}`);
 
     const report = loadReport(reportPath);
