@@ -1,7 +1,5 @@
 const axios = require('axios');
-const path = require('path');
 const config = require('../config');
-const { readCSV, writeCSV, normalizeURL } = require('../utils/csv-handler');
 const log = require('../utils/logger');
 const {
     generateRequestId,

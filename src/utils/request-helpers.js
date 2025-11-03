@@ -81,31 +81,20 @@ const requestIdExists = (outputDir, requestId) => {
     return fs.existsSync(requestDir);
 };
 
-/**
- * Escape CSV field (handle quotes and commas)
- * @param {string} field - Field to escape
- * @returns {string} Escaped field
- */
-const escapeCsvField = (field) => {
-    if (field === null || field === undefined) {
-        return '';
-    }
-
-    const str = String(field);
-
-    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-        return `"${str.replace(/"/g, '""')}"`;
-    }
-
-    return str;
-};
 
 /**
  * Append rows to google-results.csv
  * @param {string} csvPath - Path to CSV file
  * @param {Array} rows - Array of row objects with URL, STATUS, JOB_COUNT, SNIPPET, LOGO_URL, REMARKS
- */
+*/
 const appendToGoogleResultsCsv = (csvPath, rows) => {
+    const escapeCsvField = (field) => {
+        if (field === null || field === undefined) return '';
+        const str = String(field);
+        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) return `"${str.replace(/"/g, '""')}"`;
+
+        return str;
+    };
     const csvLines = rows.map(row => {
         return [
             escapeCsvField(row.URL),

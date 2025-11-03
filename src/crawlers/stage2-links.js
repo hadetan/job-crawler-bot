@@ -10,7 +10,7 @@ const runStage2 = async () => {
     log.info('Starting Stage 2: Job Listing Page Crawler...');
 
     const inputFile = path.join(config.output.dir, 'urls.csv');
-    const outputFile = path.join(config.output.dir, 'job_links.csv');
+    const outputFile = path.join(config.output.dir, 'jobs.csv');
 
     const urls = readCSV(inputFile, 'url');
     if (urls.length === 0) {

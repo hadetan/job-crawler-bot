@@ -51,7 +51,7 @@ Basically our json is going to be our advanced reporter. It may have a structure
                 "retryCount": 3 // will not retry to parse again
             }
         ],
-        "listing_page_report": [
+        "link_extraction_report": {
             "passeUrls": [
                 { "url": "https://boards.greenhouse.io/bigid" },
                 { "url": "https://boards.greenhouse.io/zental" },
@@ -63,8 +63,8 @@ Basically our json is going to be our advanced reporter. It may have a structure
                     "reason": "" // reason of the failure
                 }
             ]
-        ],
-        "details_page_report": [
+        },
+        "detail_extraction_report": {
             "elixirr": {
                 "passeUrls": [
                     { "url": "https://www.elixirr.com/en-gb/careers/job?gh_jid=99302", "foundFrom": "" /** url of the page from where it found this url from. It should be the exact page url from where it found it from. */ },
@@ -79,7 +79,7 @@ Basically our json is going to be our advanced reporter. It may have a structure
                     }
                 ]
             }
-        ]
+        }
     }
 ```
 
@@ -87,9 +87,7 @@ Basically our json is going to be our advanced reporter. It may have a structure
 
 -   File path: `/src/crawlers/stage2-links.js`
 
--   This will visit each links from the stage-1's .csv file and extract all job links (already implemented the logic). Now what really will happen is that, the `Stage 2` will always assume that we have gone through our `Stage 1` and on the command params we HAVE TO send the request id of which we want to run, let's say we gave `nov_01_gh` to the first stage then for second stage we have to give this id or some other id we have given (we may have multiple and have to explicitly give one to it), using that the crawler will read the corresponding folders csv file and start its crawling on each links.
-
--   As it finds the job links from each job listing urls (all of the urls it saves are job listing pages url), after finding all job links, it will count and edit the csv that was generated on stage 1 under the folder with name received from request id, the status will be done, and remarks to be empty. If the stage 2 job fails then it will update the status to be failed and count 0 (as is) and in remarks it will specify why the job failed. Stage 2 will visit urls that are either with status pending or failed.
+-   This will visit each links from the stage-1's .csv file and extract all job links (already implemented the logic). Now what really will happen is that, the `Stage 2` will always assume that we have gone through our `Stage 1` and on the command params we _HAVE TO_ send the request id of which we want to run, let's say we gave `nov_01_gh` to the first stage then for second stage we have to give this id or some other id we have given (we may have multiple and have to explicitly give one to it), using that the crawler will read the corresponding folders csv file and start its crawling on each links.
 
 -   In the same .json file which is under this current request id folder, and save passed and failed urls accordingly (shown example on above snippet). Re-running the stage 2 with the same request id (e.g. `nov_01_gh`) will run all failed urls again and act accordingly. If the failed url passes now on run, then remove that url from failedUrls and put it in passedUrls.
 
