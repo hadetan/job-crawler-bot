@@ -67,6 +67,8 @@ const runStage1 = async (options = {}) => {
     const { requestDir, csvPath, reportPath } = setupRequestFolder(config.output.dir, requestId);
     log.info(`Request folder: ${requestDir}`);
 
+    const report = loadReport(reportPath);
+
     const existingUrlsInCsv = getExistingUrlsFromCsv(csvPath);
 
     const newRows = [];
@@ -77,11 +79,28 @@ const runStage1 = async (options = {}) => {
         const startIndex = (page - 1) * 10 + 1;
         log.progress(`Fetching page ${page} of ${config.crawler.maxPages}...`);
 
+        let pageReport = report.google_report.find(p => p.page === page);
+        const isRetry = pageReport !== undefined;
+
+        if (!pageReport) {
+            pageReport = {
+                page: page,
+                status: false,
+                error: null,
+                retryCount: 0
+            };
+            report.google_report.push(pageReport);
+        }
+
         try {
             const data = await fetchGoogleSearchResults(startIndex);
 
             if (!data.items || data.items.length === 0) {
                 log.info('No more results found, stopping pagination');
+
+                pageReport.status = true;
+                pageReport.error = null;
+                saveReport(reportPath, report);
                 break;
             }
 
@@ -89,7 +108,7 @@ const runStage1 = async (options = {}) => {
                 const url = item.link;
                 // Extract description (snippet)
                 const snippet = item.snippet || '';
-                
+
                 // Extract logo
                 let logoUrl = '';
                 if (item?.pagemap?.metatags.length > 0) {
@@ -111,8 +130,30 @@ const runStage1 = async (options = {}) => {
                 }
                 totalFound++;
             });
+
+            pageReport.status = true;
+            pageReport.error = null;
+            saveReport(reportPath, report);
+
         } catch (error) {
+            pageReport.status = false;
+
+            if (error.response) {
+                pageReport.error = {
+                    status: error.response.status,
+                    statusText: error.response.statusText,
+                    data: error.response.data
+                };
+            } else {
+                pageReport.error = {
+                    message: error.message
+                };
+            }
+
+            saveReport(reportPath, report);
+
             log.error(`Failed to fetch page ${page}: ${error.message}`);
+
             if (error.response?.status === 403 || error.response?.status === 400) {
                 break;
             }

@@ -50,7 +50,7 @@
 **So that** I can resume from failures and monitor retry attempts
 
 ### Acceptance Criteria:
-- [ ] Create `report.json` with structure:
+- [x] Create `report.json` with structure:
 ```json
 {
   "google_report": [
@@ -63,11 +63,11 @@
   ]
 }
 ```
-- [ ] After each page fetch:
-  - [ ] If **successful**: `status: true`, `error: null`, `retryCount: <current>`
-  - [ ] If **failed**: `status: false`, `error: <API error response only>`, `retryCount: <current>`
-- [ ] Store only API response error (no stack traces, no code errors)
-- [ ] Load existing `report.json` if resuming a previous run
+- [x] After each page fetch:
+  - [x] If **successful**: `status: true`, `error: null`, `retryCount: <current>`
+  - [x] If **failed**: `status: false`, `error: <API error response only>`, `retryCount: <current>`
+- [x] Store only API response error (no stack traces, no code errors)
+- [x] Load existing `report.json` if resuming a previous run
 
 ---
 
