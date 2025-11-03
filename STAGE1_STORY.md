@@ -186,12 +186,12 @@
 **So that** the crawler receives correct parameters
 
 ### Acceptance Criteria:
-- [ ] Update `src/index.js` (or main entry) to parse:
-  - [ ] `--stage=1`
-  - [ ] `--id={requestId}` (optional)
-  - [ ] `--clean` (optional flag)
-- [ ] Pass parameters to `runStage1({ requestId, clean })`
-- [ ] Validate `--stage=1` before executing Stage 1
+- [x] Update `src/index.js` (or main entry) to parse:
+  - [x] `--stage=1`
+  - [x] `--id={requestId}` (optional)
+  - [x] `--clean` (optional flag)
+- [x] Pass parameters to `runStage1({ requestId, clean })`
+- [x] Validate `--stage=1` before executing Stage 1
 
 ---
 
@@ -213,21 +213,6 @@
     retryDelay: 2000
   }
   ```
-
----
-
-## **Testing Checklist** ✅
-
-- [ ] **Test 1**: Fresh run with custom ID
-- [ ] **Test 2**: Fresh run without ID (auto-generate)
-- [ ] **Test 3**: Resume after failure (same ID)
-- [ ] **Test 4**: Max retry limit reached
-- [ ] **Test 5**: `--clean` flag resets progress
-- [ ] **Test 6**: Duplicate URLs skipped
-- [ ] **Test 7**: API 100-result limit handling
-- [ ] **Test 8**: Missing `og:image` in results
-- [ ] **Test 9**: All pages successful (no resume needed)
-- [ ] **Test 10**: Multiple request IDs can coexist
 
 ---
 

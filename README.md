@@ -39,8 +39,36 @@ Runs Stage 1 → Stage 2 → Stage 3 in sequence.
 
 ### Run Individual Stages
 
+#### Stage 1: Google Search with Checkpointing
+
+Stage 1 now supports request IDs, checkpointing, and resume functionality:
+
 ```bash
-npm start -- --stage=1    # Run only Stage 1 (Google API search)
+# Run with auto-generated request ID
+npm start -- --stage=1
+
+# Run with custom request ID
+npm start -- --stage=1 --id=nov_03_gh
+
+# Resume from failed page (automatically detects and resumes)
+npm start -- --stage=1 --id=nov_03_gh
+
+# Reset progress and start fresh (keeps CSV data)
+npm start -- --stage=1 --id=nov_03_gh --clean
+```
+
+**Stage 1 Features:**
+- **Request ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
+- **Dedicated Folders**: Results saved in `/output/{requestId}/` with separate CSV and progress tracking
+- **Checkpoint & Resume**: Automatically resumes from failed pages without re-fetching successful pages
+- **Max Retry Limit**: Stops after 3 failed attempts (configurable via `MAX_RETRY_COUNT`)
+- **Clean Flag**: Reset progress with `--clean` while preserving collected URLs
+- **Duplicate Handling**: Automatically skips duplicate URLs across pages
+- **API Limit Detection**: Gracefully handles Google's 100-result (10-page) limit
+
+#### Stage 2 & 3
+
+```bash
 npm start -- --stage=2    # Run only Stage 2 (extract job links)
 npm start -- --stage=3    # Run only Stage 3 (extract job details)
 ```
@@ -73,6 +101,7 @@ All settings are configured via the `.env` file. Copy `.env.example` to `.env` a
 |----------|---------|-------------|
 | `MAX_RETRIES` | `3` | Maximum retry attempts for failed operations |
 | `RETRY_DELAY` | `2000` | Base delay between retries in milliseconds |
+| `MAX_RETRY_COUNT` | `3` | Maximum retry attempts for Stage 1 page failures (checkpoint system) |
 
 ### Output
 
@@ -93,44 +122,31 @@ Customize CSS selectors for extracting data. Multiple selectors are tried in ord
 - `JOB_LOCATION_SELECTORS`: Default `.location,[class*="location"],[data-location]`
 - `JOB_SKILLS_SELECTORS`: Default `.skills,[class*="skill"],[class*="requirement"]`
 
-## Output Files
-
-All CSV files are saved to the `output/` directory:
-
-### output/urls.csv (Stage 1)
-```csv
-url
-https://boards.greenhouse.io/company1/jobs
-https://boards.greenhouse.io/company2/jobs
-```
-
-Single column containing job listing page URLs from Google search.
-
-### output/job_links.csv (Stage 2)
-```csv
-url
-https://boards.greenhouse.io/company1/jobs/123456
-https://boards.greenhouse.io/company1/jobs/789012
-```
-
-Single column containing direct job posting URLs extracted from listing pages.
-
-### output/jobs_data.csv (Stage 3)
-```csv
-url,title,description,location,skills
-https://boards.greenhouse.io/company1/jobs/123456,"Senior Software Engineer","We are looking for...","San Francisco","JavaScript; React; Node.js"
-```
-
-Multiple columns with complete job details:
-- **url**: Direct link to job posting
-- **title**: Job title
-- **description**: Job description (HTML stripped, plain text)
-- **location**: Job location
-- **skills**: Skills/requirements (semicolon-separated)
-
 ## How It Works
 
-1. **Stage 1** queries Google Custom Search API with your search query (e.g., `site:boards.greenhouse.io`)
+### Stage 1: Google Search with Checkpointing
+
+Stage 1 queries Google Custom Search API with your search query (e.g., `site:boards.greenhouse.io`) and implements a robust checkpoint system:
+
+1. **Request ID Assignment**: Each run gets a unique ID (auto-generated or custom)
+2. **Folder Creation**: Creates `/output/{requestId}/` with `google-results.csv` and `report.json`
+3. **Page-by-Page Fetching**: Fetches up to 10 pages (100 results) from Google API
+4. **Progress Tracking**: Records success/failure of each page in `report.json`
+5. **Data Extraction**: Extracts URL, snippet, and logo from search results
+6. **Duplicate Detection**: Skips URLs already found in previous pages
+7. **Error Handling**: Saves error details for failed pages and supports resume
+
+**Checkpoint/Resume Flow:**
+- If a page fails, the next run with the same `--id` automatically resumes from that page
+- Retry counter increments on each attempt (max 3 attempts by default)
+- Use `--clean` flag to reset progress and start from page 1
+
+**API Limit Handling:**
+- Google Custom Search API has a hard limit of 100 results (10 pages)
+- Crawler detects this limit and stops gracefully with a clear message
+
+### Stage 2 & 3
+
 2. **Stage 2** visits each URL from Stage 1 using Puppeteer and extracts all job posting links
 3. **Stage 3** visits each job URL from Stage 2 and extracts detailed information
 
@@ -142,14 +158,53 @@ All stages support:
 
 ## Troubleshooting
 
-### Google API Quota Exceeded
+### Stage 1 Issues
+
+#### Request Already Completed
+
+**Message**: `All pages already completed successfully for request ID {id}. Use --clean to start fresh.`
+
+**Solution**:
+- Use `--clean` flag to reset and start over: `npm start -- --stage=1 --id=your_id --clean`
+- Or use a new request ID: `npm start -- --stage=1 --id=new_id`
+
+#### Max Retry Limit Reached
+
+**Message**: `⚠️  Max retry limit (3) reached for page {X}`
+
+**Solution**:
+- Check the error in `output/{requestId}/report.json` for details
+- Common causes: network issues, API quota exceeded, rate limiting
+- Fix the underlying issue, then use `--clean` to restart
+- Or increase `MAX_RETRY_COUNT` in `.env` (not recommended without fixing root cause)
+
+#### Duplicate URLs Skipped
+
+**Message**: `Duplicates skipped: {count}`
+
+**Info**: This is normal behavior. Google search results may contain the same URL on different pages. The crawler automatically deduplicates to prevent redundant processing in later stages.
+
+### Google API Issues
+
+#### Google API Quota Exceeded
 
 **Error**: `Google API quota exceeded or invalid credentials`
 
 **Solution**:
-- Check your API key is correct
+- Check your API key is correct in `.env`
 - Verify you haven't exceeded your daily quota (100 queries/day on free tier)
+- Each page counts as 1 query, so 10 pages = 10 queries
 - Wait 24 hours for quota to reset or upgrade your plan
+- Check quota usage: [Google Cloud Console](https://console.cloud.google.com/apis/dashboard)
+
+#### API Result Limit Reached
+
+**Message**: `Reached Google API result limit (100 results/10 pages). Stopping pagination.`
+
+**Info**: This is expected behavior. Google Custom Search API has a hard limit of 100 results per query. If you need more results:
+- Use more specific search queries
+- Run multiple searches with different queries
+- Use different request IDs for different query variations
 
 ### Puppeteer Installation Issues
 
@@ -184,14 +239,17 @@ sudo apt-get install -y gconf-service libasound2 libatk1.0-0 libc6 libcairo2 lib
 
 ## Example Workflow
 
+### Basic Usage
+
 ```bash
 # 1. Set up environment
 cp .env.example .env
 # Edit .env with your Google API credentials
 
-# 2. Run Stage 1 to find job listing pages
+# 2. Run Stage 1 to find job listing pages (with auto-generated ID)
 npm start -- --stage=1
-# Output: output/urls.csv with job board URLs
+# Output: output/123456/google-results.csv with job board URLs
+#         output/123456/report.json with progress tracking
 
 # 3. Run Stage 2 to extract job links
 npm start -- --stage=2
@@ -205,23 +263,106 @@ npm start -- --stage=3
 npm start
 ```
 
+### Advanced Stage 1 Usage
+
+```bash
+# Custom request ID for tracking
+npm start -- --stage=1 --id=nov_03_greenhouse
+
+# Resume after a failure (continues from failed page)
+npm start -- --stage=1 --id=nov_03_greenhouse
+# Output: "Resuming from page 7 where previous run failed"
+
+# Check if already complete
+npm start -- --stage=1 --id=nov_03_greenhouse
+# Output: "All pages already completed successfully. Use --clean to start fresh."
+
+# Reset and start over (keeps existing CSV data)
+npm start -- --stage=1 --id=nov_03_greenhouse --clean
+# Output: "Clean flag detected. Resetting progress for request ID nov_03_greenhouse"
+
+# Multiple request IDs can coexist
+npm start -- --stage=1 --id=company_A
+npm start -- --stage=1 --id=company_B
+# Each has its own folder: output/company_A/ and output/company_B/
+```
+
+### Handling Stage 1 Failures
+
+**Scenario 1: Network Error on Page 5**
+```bash
+# Run fails on page 5 due to network timeout
+npm start -- --stage=1 --id=my_run
+# Output: "Failed to fetch page 5: Network timeout"
+#         report.json shows: page 5 status=false, retryCount=1
+
+# Resume automatically
+npm start -- --stage=1 --id=my_run
+# Output: "Resuming from page 5 where previous run failed"
+#         Continues from page 5, increments retryCount to 2
+```
+
+**Scenario 2: Max Retries Reached**
+```bash
+# After 3 failed attempts on page 5
+npm start -- --stage=1 --id=my_run
+# Output: "⚠️  Max retry limit (3) reached for page 5"
+#         "Error: Network timeout"
+#         "This page will be skipped. Review full error in report.json"
+#         "Exiting..."
+
+# Fix the issue (check network, API quota, etc.)
+# Then use --clean to restart
+npm start -- --stage=1 --id=my_run --clean
+```
+
+**Scenario 3: Google API 100-Result Limit**
+```bash
+npm start -- --stage=1 --id=large_search
+# Output: "Reached Google API result limit (100 results/10 pages). Stopping pagination."
+# This is normal - Google limits Custom Search to 100 results per query
+```
+
 ## Project Structure
 
 ```
 job-crawler-bot/
 ├── src/
-│   ├── index.js                 # Main entry point
-│   ├── config.js                # Environment variable loader
+│   ├── index.js                      # Main entry point
+│   ├── config.js                     # Environment variable loader
 │   ├── crawlers/
-│   │   ├── stage1-search.js     # Google Custom Search API crawler
-│   │   ├── stage2-links.js      # Job listing page crawler
-│   │   └── stage3-details.js    # Job details extractor
-│   └── utils/
-│       ├── csv-handler.js       # CSV operations
-│       └── logger.js            # Logging utility
-├── output/                      # CSV output files (gitignored)
-├── .env                         # Your environment variables (gitignored)
-├── .env.example                 # Environment variable template
+│   │   ├── stage1-search.js          # Google Custom Search API crawler
+│   │   ├── stage2-links.js           # Job listing page crawler
+│   │   └── stage3-details.js         # Job details extractor
+│   ├── extractors/
+│   │   ├── index.js                  # Extractor utilities
+│   │   ├── intelligent-analysis.js   # AI-based job data extraction
+│   │   └── structured-data.js        # Structured data extraction
+│   ├── utils/
+│   │   ├── cookie-handler.js         # Cookie management
+│   │   ├── csv-handler.js            # CSV operations
+│   │   ├── description-cleaner.js    # Clean and format job descriptions
+│   │   ├── dom-helpers.js            # DOM manipulation utilities
+│   │   ├── extract-job-details.js    # Job detail extraction logic
+│   │   ├── file-helpers.js           # File system operations
+│   │   ├── format-helpers.js         # Data formatting utilities
+│   │   ├── index.js                  # Utils index
+│   │   ├── job-links.js              # Job link processing
+│   │   ├── logger.js                 # Logging utility
+│   │   ├── process-job-url.js        # URL processing
+│   │   └── request-helpers.js        # Request ID and checkpoint management (Stage 1)
+│   └── validators/
+│       ├── content-validator.js      # Content validation
+│       └── index.js                  # Validators index
+├── output/                           # CSV output files (gitignored)
+│   ├── {requestId}/                  # Stage 1 results per request ID
+│   │   ├── google-results.csv        # Search results with metadata
+│   │   └── report.json               # Progress tracking for checkpoint/resume
+│   ├── job_links.csv                 # Stage 2 results
+│   └── jobs_data.csv                 # Stage 3 results
+├── .env                              # Your environment variables (gitignored)
+├── .env.example                      # Environment variable template
+├── STAGE1_STORY.md                   # Stage 1 implementation documentation
 ├── package.json
 └── README.md
 ```
