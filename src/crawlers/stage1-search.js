@@ -127,7 +127,7 @@ const runStage1 = async (options = {}) => {
                 saveReport(reportPath, report);
                 return;
             }
-            
+
             // Increment retry count
             pageReport.retryCount += 1;
         }
@@ -192,11 +192,27 @@ const runStage1 = async (options = {}) => {
 
             saveReport(reportPath, report);
 
-            log.error(`Failed to fetch page ${page}: ${error.message}`);
+            // Check if we hit the Google API 100-result limit
+            if (error.response?.status === 400) {
+                const errorMessage = error.response?.data?.error?.message || '';
+                const errorDetails = JSON.stringify(error.response?.data?.error?.errors || []);
 
-            if (error.response?.status === 403 || error.response?.status === 400) {
+                if (startIndex > 91 || errorMessage.toLowerCase().includes('invalid value') ||
+                    errorDetails.toLowerCase().includes('start')) {
+                    log.info(`Reached Google API result limit (100 results/10 pages). Stopping pagination.`);
+                    break;
+                }
+
+                log.error(`Failed to fetch page ${page}: ${error.message}`);
                 break;
             }
+
+            if (error.response?.status === 403) {
+                log.error(`Failed to fetch page ${page}: ${error.message}`);
+                break;
+            }
+
+            log.error(`Failed to fetch page ${page}: ${error.message}`);
         }
     }
 

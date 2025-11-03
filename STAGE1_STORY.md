@@ -135,10 +135,10 @@
 **So that** the CSV doesn't contain redundant entries
 
 ### Acceptance Criteria:
-- [ ] Maintain a Set/Map of all URLs added during current run
-- [ ] Before adding URL to CSV, check if already exists
-- [ ] If duplicate: skip and don't add to CSV
-- [ ] Log summary at end: `"Duplicates skipped: {count}"`
+- [x] Maintain a Set/Map of all URLs added during current run
+- [x] Before adding URL to CSV, check if already exists
+- [x] If duplicate: skip and don't add to CSV
+- [x] Log summary at end: `"Duplicates skipped: {count}"`
 
 ---
 
@@ -149,10 +149,10 @@
 **So that** the crawler doesn't crash with unhandled errors
 
 ### Acceptance Criteria:
-- [ ] Detect when API returns error for exceeding 100 results
-- [ ] Log message: `"Reached Google API result limit (100 results/10 pages). Stopping pagination."`
-- [ ] Mark last attempted page with error details in `report.json`
-- [ ] Exit gracefully
+- [x] Detect when API returns error for exceeding 100 results
+- [x] Log message: `"Reached Google API result limit (100 results/10 pages). Stopping pagination."`
+- [x] Mark last attempted page with error details in `report.json`
+- [x] Exit gracefully
 
 ---
 
