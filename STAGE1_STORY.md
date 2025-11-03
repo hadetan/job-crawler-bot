@@ -119,12 +119,12 @@
 **So that** I can retry all pages from beginning
 
 ### Acceptance Criteria:
-- [ ] Command accepts `--clean` flag: `npm start -- --stage=1 --id=nov_03_gh --clean`
-- [ ] When provided:
-  - [ ] Reset `google_report` array to `[]` in `report.json`
-  - [ ] Keep CSV file intact (do NOT delete or truncate)
-  - [ ] Start crawling from page 1
-  - [ ] Display: `"Clean flag detected. Resetting progress for request ID {id}"`
+- [x] Command accepts `--clean` flag: `npm start -- --stage=1 --id=nov_03_gh --clean`
+- [x] When provided:
+  - [x] Reset `google_report` array to `[]` in `report.json`
+  - [x] Keep CSV file intact (do NOT delete or truncate)
+  - [x] Start crawling from page 1
+  - [x] Display: `"Clean flag detected. Resetting progress for request ID {id}"`
 
 ---
 

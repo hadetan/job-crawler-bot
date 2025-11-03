@@ -69,6 +69,13 @@ const runStage1 = async (options = {}) => {
 
     const report = loadReport(reportPath);
 
+    // --clean flag: reset google_report array in {requestId}/report.json
+    if (options.clean) {
+        log.info(`Clean flag detected. Resetting progress for request ID ${requestId}`);
+        report.google_report = [];
+        saveReport(reportPath, report);
+    }
+
     // Resume from checkpoint - The page number where it failed, resume from there
     let startPage = 1;
     const firstFailedPage = report.google_report.find(p => p.status === false);
