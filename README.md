@@ -59,7 +59,7 @@ npm start -- --stage=1 --id=nov_03_gh --clean
 
 **Stage 1 Features:**
 - **Request ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
-- **Dedicated Folders**: Results saved in `/output/{requestId}/` with separate CSV and progress tracking
+- **Dedicated Folders**: Results saved in `/output/job_boards/{requestId}/` with separate CSV and progress tracking
 - **Checkpoint & Resume**: Automatically resumes from failed pages without re-fetching successful pages
 - **Max Retry Limit**: Stops after 3 failed attempts (configurable via `MAX_RETRY_COUNT`)
 - **Clean Flag**: Reset progress with `--clean` while preserving collected URLs
@@ -129,7 +129,7 @@ Customize CSS selectors for extracting data. Multiple selectors are tried in ord
 Stage 1 queries Google Custom Search API with your search query (e.g., `site:boards.greenhouse.io`) and implements a robust checkpoint system:
 
 1. **Request ID Assignment**: Each run gets a unique ID (auto-generated or custom)
-2. **Folder Creation**: Creates `/output/{requestId}/` with `google-results.csv` and `report.json`
+2. **Folder Creation**: Creates `/output/job_boards/{requestId}/` with `google-results.csv` and `report.json`
 3. **Page-by-Page Fetching**: Fetches up to 10 pages (100 results) from Google API
 4. **Progress Tracking**: Records success/failure of each page in `report.json`
 5. **Data Extraction**: Extracts URL, snippet, and logo from search results
@@ -173,7 +173,7 @@ All stages support:
 **Message**: `⚠️  Max retry limit (3) reached for page {X}`
 
 **Solution**:
-- Check the error in `output/{requestId}/report.json` for details
+- Check the error in `output/job_boards/{requestId}/report.json` for details
 - Common causes: network issues, API quota exceeded, rate limiting
 - Fix the underlying issue, then use `--clean` to restart
 - Or increase `MAX_RETRY_COUNT` in `.env` (not recommended without fixing root cause)
@@ -248,8 +248,8 @@ cp .env.example .env
 
 # 2. Run Stage 1 to find job listing pages (with auto-generated ID)
 npm start -- --stage=1
-# Output: output/123456/google-results.csv with job board URLs
-#         output/123456/report.json with progress tracking
+# Output: output/job_boards/123456/google-results.csv with job board URLs
+#         output/job_boards/123456/report.json with progress tracking
 
 # 3. Run Stage 2 to extract job links
 npm start -- --stage=2
@@ -355,9 +355,10 @@ job-crawler-bot/
 │       ├── content-validator.js      # Content validation
 │       └── index.js                  # Validators index
 ├── output/                           # CSV output files (gitignored)
-│   ├── {requestId}/                  # Stage 1 results per request ID
-│   │   ├── google-results.csv        # Search results with metadata
-│   │   └── report.json               # Progress tracking for checkpoint/resume
+│   ├── job_boards/                   # Stage 1 results
+│   │   └── {requestId}/              # Per request ID folder
+│   │       ├── google-results.csv    # Search results with metadata
+│   │       └── report.json           # Progress tracking for checkpoint/resume
 │   ├── job_links.csv                 # Stage 2 results
 │   └── jobs_data.csv                 # Stage 3 results
 ├── .env                              # Your environment variables (gitignored)

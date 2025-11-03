@@ -16,7 +16,7 @@ const generateRequestId = () => {
  * @returns {object} Object containing paths to CSV and JSON files
  */
 const setupRequestFolder = (outputDir, requestId) => {
-    const requestDir = path.join(outputDir, requestId);
+    const requestDir = path.join(outputDir, 'job_boards', requestId);
     const csvPath = path.join(requestDir, 'google-results.csv');
     const reportPath = path.join(requestDir, 'report.json');
 
@@ -77,7 +77,7 @@ const saveReport = (reportPath, report) => {
  * @returns {boolean} True if folder exists
  */
 const requestIdExists = (outputDir, requestId) => {
-    const requestDir = path.join(outputDir, requestId);
+    const requestDir = path.join(outputDir, 'job_boards', requestId);
     return fs.existsSync(requestDir);
 };
 
