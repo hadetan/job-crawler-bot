@@ -9,13 +9,20 @@ const runStage3 = require('./crawlers/stage3-details');
 const parseArgs = () => {
     const args = process.argv.slice(2);
     const stageArg = args.find(arg => arg.startsWith('--stage='));
+    const idArg = args.find(arg => arg.startsWith('--id='));
+    const cleanFlag = args.includes('--clean');
 
+    let stage = null;
     if (stageArg) {
-        const stage = stageArg.split('=')[1];
-        return parseInt(stage, 10);
+        stage = parseInt(stageArg.split('=')[1], 10);
     }
 
-    return null;
+    let requestId = null;
+    if (idArg) {
+        requestId = idArg.split('=')[1];
+    }
+
+    return { stage, requestId, clean: cleanFlag };
 };
 
 const validateInputFile = (filePath, stageName) => {
@@ -29,11 +36,11 @@ const validateInputFile = (filePath, stageName) => {
     const startTime = Date.now();
 
     try {
-        const stage = parseArgs();
+        const { stage, requestId, clean } = parseArgs();
 
         if (stage !== null) {
             if (stage === 1) {
-                await runStage1();
+                await runStage1({ requestId, clean });
             } else if (stage === 2) {
                 validateInputFile(path.join(config.output.dir, 'urls.csv'), 'Stage 2');
                 await runStage2();
@@ -45,7 +52,7 @@ const validateInputFile = (filePath, stageName) => {
                 process.exit(1);
             }
         } else {
-            await runStage1();
+            await runStage1({ requestId, clean });
             await runStage2();
             await runStage3();
         }

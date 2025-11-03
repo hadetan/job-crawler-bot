@@ -3,6 +3,13 @@ const path = require('path');
 const config = require('../config');
 const { readCSV, writeCSV, normalizeURL } = require('../utils/csv-handler');
 const log = require('../utils/logger');
+const {
+    generateRequestId,
+    setupRequestFolder,
+    loadReport,
+    saveReport,
+    requestIdExists
+} = require('../utils/request-helpers');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -41,8 +48,23 @@ const fetchGoogleSearchResults = async (startIndex, retryCount = 0) => {
     }
 };
 
-const runStage1 = async () => {
+const runStage1 = async (options = {}) => {
     log.info('Starting Stage 1: Google Custom Search...');
+
+    let requestId = options.requestId;
+    if (!requestId) {
+        requestId = generateRequestId();
+        log.info(`No ID provided. Generated request ID: ${requestId}`);
+    } else {
+        if (requestIdExists(config.output.dir, requestId)) {
+            log.info(`Using existing request ID: ${requestId}`);
+        } else {
+            log.info(`Starting new Stage 1 run with request ID: ${requestId}`);
+        }
+    }
+
+    const { requestDir, csvPath, reportPath } = setupRequestFolder(config.output.dir, requestId);
+    log.info(`Request folder: ${requestDir}`);
 
     const outputFile = path.join(config.output.dir, 'urls.csv');
     const existingURLs = readCSV(outputFile, 'url').map(normalizeURL);
