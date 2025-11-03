@@ -97,18 +97,18 @@
 **So that** I don't get stuck in infinite retry loops
 
 ### Acceptance Criteria:
-- [ ] Add `MAX_RETRY_COUNT` environment variable (default: `3`)
-- [ ] Add to `config.js` reading from `process.env.MAX_RETRY_COUNT`
-- [ ] When `retryCount` reaches `MAX_RETRY_COUNT` for a page:
-  - [ ] Display informative message:
+- [x] Add `MAX_RETRY_COUNT` environment variable (default: `3`)
+- [x] Add to `config.js` reading from `process.env.MAX_RETRY_COUNT`
+- [x] When `retryCount` reaches `MAX_RETRY_COUNT` for a page:
+  - [x] Display informative message:
     ```
     ⚠️  Max retry limit (3) reached for page {pageNum}.
     Error: {brief error message}
     This page will be skipped. You can review the full error in report.json.
     Exiting...
     ```
-  - [ ] Keep `status: false` in report
-  - [ ] Exit without crawling
+  - [x] Keep `status: false` in report
+  - [x] Exit without crawling
 
 ---
 
@@ -202,11 +202,11 @@
 **So that** I can adjust behavior without code changes
 
 ### Acceptance Criteria:
-- [ ] Add to `.env.example`:
+- [x] Add to `.env.example`:
   ```
   MAX_RETRY_COUNT=3
   ```
-- [ ] Add to `config.js`:
+- [x] Add to `config.js`:
   ```javascript
   retry: {
     maxRetries: parseInt(process.env.MAX_RETRY_COUNT) || 3,

@@ -107,7 +107,21 @@ const runStage1 = async (options = {}) => {
             };
             report.google_report.push(pageReport);
         } else if (isRetry) {
-            // Increment retry
+            if (pageReport.retryCount >= config.retry.maxRetryCount) {
+                const errorMsg = pageReport.error?.message ||
+                    pageReport.error?.statusText ||
+                    'Unknown error';
+
+                log.error(`⚠️  Max retry limit (${config.retry.maxRetryCount}) reached for page ${page}.`);
+                log.error(`Error: ${errorMsg}`);
+                log.error(`This page will be skipped. You can review the full error in report.json.`);
+                log.error(`Exiting...`);
+
+                saveReport(reportPath, report);
+                return;
+            }
+            
+            // Increment retry count
             pageReport.retryCount += 1;
         }
 

@@ -39,7 +39,8 @@ const config = {
     },
     retry: {
         maxRetries: parseNumber(process.env.MAX_RETRIES, 3),
-        retryDelay: parseNumber(process.env.RETRY_DELAY, 2000)
+        retryDelay: parseNumber(process.env.RETRY_DELAY, 2000),
+        maxRetryCount: parseNumber(process.env.MAX_RETRY_COUNT, 3)
     },
     output: {
         dir: process.env.OUTPUT_DIR || './output'
