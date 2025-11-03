@@ -1,13 +1,44 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
+const fs = require('fs');
 const pLimit = require('p-limit');
 const config = require('../config');
 const { readCSV, writeCSV, normalizeURL } = require('../utils/csv-handler');
 const log = require('../utils/logger');
 const { extractJobLinks } = require('../utils/job-links');
+const { generateRequestId } = require('../utils/request-helpers');
 
-const runStage2 = async () => {
+const runStage2 = async (options = {}) => {
     log.info('Starting Stage 2: Job Listing Page Crawler...');
+
+    // Validate
+    if (!options.runId) {
+        log.error('Stage 2 requires --run parameter. Usage: npm start -- --stage=2 --run={requestId} [--id={jobId}] [--clean]');
+        process.exit(1);
+    }
+
+    const requestDir = path.join(config.output.dir, 'job_boards', options.runId);
+    if (!fs.existsSync(requestDir)) {
+        log.error(`Stage 1 run '${options.runId}' not found at ${requestDir}`);
+        log.error('Please run Stage 1 first with this requestId or use an existing one.');
+        process.exit(1);
+    }
+
+    const googleResultsCsv = path.join(requestDir, 'google-results.csv');
+    if (!fs.existsSync(googleResultsCsv)) {
+        log.error(`google-results.csv not found in ${requestDir}`);
+        process.exit(1);
+    }
+
+    let jobId = options.jobId;
+    if (!jobId) {
+        jobId = generateRequestId();
+        log.info(`No jobId provided. Generated jobId: ${jobId}`);
+    } else {
+        log.info(`Starting Stage 2 with jobId: ${jobId}, reading from requestId: ${options.runId}`);
+    }
+
+    log.info(`Reading job board URLs from requestId: ${options.runId}`);
 
     const inputFile = path.join(config.output.dir, 'urls.csv');
     const outputFile = path.join(config.output.dir, 'jobs.csv');

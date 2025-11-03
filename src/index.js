@@ -10,6 +10,7 @@ const parseArgs = () => {
     const args = process.argv.slice(2);
     const stageArg = args.find(arg => arg.startsWith('--stage='));
     const idArg = args.find(arg => arg.startsWith('--id='));
+    const runArg = args.find(arg => arg.startsWith('--run='));
     const cleanFlag = args.includes('--clean');
 
     let stage = null;
@@ -22,7 +23,12 @@ const parseArgs = () => {
         requestId = idArg.split('=')[1];
     }
 
-    return { stage, requestId, clean: cleanFlag };
+    let runId = null;
+    if (runArg) {
+        runId = runArg.split('=')[1];
+    }
+
+    return { stage, requestId, runId, clean: cleanFlag };
 };
 
 const validateInputFile = (filePath, stageName) => {
@@ -36,14 +42,13 @@ const validateInputFile = (filePath, stageName) => {
     const startTime = Date.now();
 
     try {
-        const { stage, requestId, clean } = parseArgs();
+        const { stage, requestId, runId, clean } = parseArgs();
 
         if (stage !== null) {
             if (stage === 1) {
                 await runStage1({ requestId, clean });
             } else if (stage === 2) {
-                validateInputFile(path.join(config.output.dir, 'urls.csv'), 'Stage 2');
-                await runStage2();
+                await runStage2({ runId, jobId: requestId, clean });
             } else if (stage === 3) {
                 validateInputFile(path.join(config.output.dir, 'job_links.csv'), 'Stage 3');
                 await runStage3();
