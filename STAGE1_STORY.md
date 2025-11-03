@@ -29,17 +29,17 @@
 **So that** Stage 2 can process them later
 
 ### Acceptance Criteria:
-- [ ] CSV has headers: `URL`, `STATUS`, `JOB_COUNT`, `SNIPPET`, `LOGO_URL`, `REMARKS`
-- [ ] Extract `URL` from `items[index].link`
-- [ ] Extract `SNIPPET` from `items[index].snippet`
-- [ ] Extract `LOGO_URL` from `items[index].pagemap.metatags[0]["og:image"]`
-  - [ ] Leave empty if `og:image` doesn't exist
-- [ ] Set default values:
-  - [ ] `STATUS` = `"pending"`
-  - [ ] `JOB_COUNT` = `0`
-  - [ ] `REMARKS` = `""`
-- [ ] Skip duplicate URLs within the same run (across different pages)
-- [ ] Append to CSV after each page is processed successfully
+- [x] CSV has headers: `URL`, `STATUS`, `JOB_COUNT`, `SNIPPET`, `LOGO_URL`, `REMARKS`
+- [x] Extract `URL` from `items[index].link`
+- [x] Extract `SNIPPET` from `items[index].snippet`
+- [x] Extract `LOGO_URL` from `items[index].pagemap.metatags[0]["og:image"]`
+  - [x] Leave empty if `og:image` doesn't exist
+- [x] Set default values:
+  - [x] `STATUS` = `"pending"`
+  - [x] `JOB_COUNT` = `0`
+  - [x] `REMARKS` = `""`
+- [x] Skip duplicate URLs within the same run (across different pages)
+- [x] Append to CSV after each page is processed successfully
 
 ---
 

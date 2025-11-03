@@ -8,7 +8,9 @@ const {
     setupRequestFolder,
     loadReport,
     saveReport,
-    requestIdExists
+    requestIdExists,
+    appendToGoogleResultsCsv,
+    getExistingUrlsFromCsv
 } = require('../utils/request-helpers');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -33,7 +35,6 @@ const fetchGoogleSearchResults = async (startIndex, retryCount = 0) => {
         }
 
         if (error.response?.status === 400) {
-            log.error('Invalid API key or Search Engine ID');
             throw error;
         }
 
@@ -66,11 +67,9 @@ const runStage1 = async (options = {}) => {
     const { requestDir, csvPath, reportPath } = setupRequestFolder(config.output.dir, requestId);
     log.info(`Request folder: ${requestDir}`);
 
-    const outputFile = path.join(config.output.dir, 'urls.csv');
-    const existingURLs = readCSV(outputFile, 'url').map(normalizeURL);
-    const existingSet = new Set(existingURLs);
+    const existingUrlsInCsv = getExistingUrlsFromCsv(csvPath);
 
-    const newURLs = [];
+    const newRows = [];
     let totalFound = 0;
     let duplicatesSkipped = 0;
 
@@ -88,13 +87,27 @@ const runStage1 = async (options = {}) => {
 
             data.items.forEach(item => {
                 const url = item.link;
-                const normalizedURL = normalizeURL(url);
+                // Extract description (snippet)
+                const snippet = item.snippet || '';
+                
+                // Extract logo
+                let logoUrl = '';
+                if (item?.pagemap?.metatags.length > 0) {
+                    logoUrl = item.pagemap.metatags[0]['og:image'] || item?.pagemap?.cse_thumbnail?.[0].src;
+                }
 
-                if (existingSet.has(normalizedURL)) {
+                if (existingUrlsInCsv.has(url)) {
                     duplicatesSkipped++;
                 } else {
-                    existingSet.add(normalizedURL);
-                    newURLs.push({ url });
+                    existingUrlsInCsv.add(url);
+                    newRows.push({
+                        URL: url,
+                        STATUS: 'pending',
+                        JOB_COUNT: 0,
+                        SNIPPET: snippet,
+                        LOGO_URL: logoUrl,
+                        REMARKS: ''
+                    });
                 }
                 totalFound++;
             });
@@ -106,14 +119,14 @@ const runStage1 = async (options = {}) => {
         }
     }
 
-    if (newURLs.length > 0) {
-        writeCSV(outputFile, newURLs, ['url']);
-        log.success(`Stage 1 complete: ${newURLs.length} new URLs saved to ${outputFile}`);
+    if (newRows.length > 0) {
+        appendToGoogleResultsCsv(csvPath, newRows);
+        log.success(`Stage 1 complete: ${newRows.length} new URLs saved to ${csvPath}`);
     } else {
         log.info('Stage 1 complete: No new URLs found');
     }
 
-    log.info(`Summary - Total found: ${totalFound}, New: ${newURLs.length}, Duplicates skipped: ${duplicatesSkipped}`);
+    log.info(`Summary - Total found: ${totalFound}, New: ${newRows.length}, Duplicates skipped: ${duplicatesSkipped}`);
 };
 
 module.exports = runStage1;

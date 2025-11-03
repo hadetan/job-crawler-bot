@@ -81,10 +81,85 @@ const requestIdExists = (outputDir, requestId) => {
     return fs.existsSync(requestDir);
 };
 
+/**
+ * Escape CSV field (handle quotes and commas)
+ * @param {string} field - Field to escape
+ * @returns {string} Escaped field
+ */
+const escapeCsvField = (field) => {
+    if (field === null || field === undefined) {
+        return '';
+    }
+
+    const str = String(field);
+
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+
+    return str;
+};
+
+/**
+ * Append rows to google-results.csv
+ * @param {string} csvPath - Path to CSV file
+ * @param {Array} rows - Array of row objects with URL, STATUS, JOB_COUNT, SNIPPET, LOGO_URL, REMARKS
+ */
+const appendToGoogleResultsCsv = (csvPath, rows) => {
+    const csvLines = rows.map(row => {
+        return [
+            escapeCsvField(row.URL),
+            escapeCsvField(row.STATUS),
+            escapeCsvField(row.JOB_COUNT),
+            escapeCsvField(row.SNIPPET),
+            escapeCsvField(row.LOGO_URL),
+            escapeCsvField(row.REMARKS)
+        ].join(',');
+    });
+
+    fs.appendFileSync(csvPath, csvLines.join('\n') + '\n', 'utf-8');
+};
+
+/**
+ * Read existing URLs from google-results.csv
+ * @param {string} csvPath - Path to CSV file
+ * @returns {Set} Set of normalized URLs already in CSV
+ */
+const getExistingUrlsFromCsv = (csvPath) => {
+    if (!fs.existsSync(csvPath)) {
+        return new Set();
+    }
+
+    const content = fs.readFileSync(csvPath, 'utf-8');
+    const lines = content.split('\n').slice(1); // Skip header
+    const urls = new Set();
+
+    for (const line of lines) {
+        if (!line.trim()) continue;
+
+        let url = '';
+        if (line.startsWith('"')) {
+            const endQuote = line.indexOf('"', 1);
+            url = line.substring(1, endQuote).replace(/""/g, '"');
+        } else {
+            const comma = line.indexOf(',');
+            url = comma > -1 ? line.substring(0, comma) : line;
+        }
+
+        if (url) {
+            urls.add(url);
+        }
+    }
+
+    return urls;
+};
+
 module.exports = {
     generateRequestId,
     setupRequestFolder,
     loadReport,
     saveReport,
-    requestIdExists
+    requestIdExists,
+    appendToGoogleResultsCsv,
+    getExistingUrlsFromCsv
 };
