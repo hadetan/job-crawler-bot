@@ -35,7 +35,14 @@ cp .env.example .env
 npm start
 ```
 
-Runs Stage 1 → Stage 2 → Stage 3 in sequence.
+**Note**: Running without parameters will execute Stage 1 with an auto-generated ID, but Stage 2 and Stage 3 require explicit IDs from previous stages. It's recommended to run stages individually with specific IDs for better control:
+
+```bash
+# Recommended workflow:
+npm start -- --stage=1 --id=my_run
+npm start -- --stage=2 --run=my_run --id=my_crawl
+npm start -- --stage=3 --run=my_crawl --id=my_extraction
+```
 
 ### Run Individual Stages
 
@@ -94,11 +101,35 @@ npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl --clean
 - **STATUS Updates**: Updates Stage 1's google-results.csv with completion status and job counts
 - **Error Recovery**: Continues processing remaining URLs even if some fail
 
-#### Stage 3
+#### Stage 3: Job Details Extraction
+
+Stage 3 reads job URLs from Stage 2 and extracts detailed information with retry logic, resume capability, and force mode:
 
 ```bash
-npm start -- --stage=3    # Run only Stage 3 (extract job details)
+# Run with custom runId and extractionId
+npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction
+
+# Run with auto-generated extractionId
+npm start -- --stage=3 --run=nov_03_crawl
+
+# Resume from checkpoint (automatically detects)
+npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction
+
+# Force mode: retry only failed URLs (ignores retry count)
+npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction --force
 ```
+
+**Stage 3 Features:**
+- **Extraction ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
+- **Run ID Required**: Must specify `--run={jobId}` to indicate which Stage 2 output to read
+- **Dedicated Folders**: Results saved in `/output/jobs/{extractionId}/` with company-based organization
+- **Retry Logic**: Automatically retries failed extractions up to 3 times (configurable via `MAX_RETRY_COUNT`)
+- **Resume Capability**: Skips completed jobs and continues from pending/failed URLs
+- **Force Mode**: Use `--force` to retry only failed URLs, ignoring retry count limits
+- **CSV Status Updates**: Updates Stage 2's jobs.csv with extraction status and file paths
+- **Company Organization**: Jobs saved as `{companyName}/{number}.txt` for easy browsing
+- **Detail Reports**: Tracks passed/failed URLs per company in report.json
+- **Comprehensive Logging**: Shows extraction methods, success rates, and company-wise job counts
 
 ## Environment Variables
 
@@ -126,9 +157,9 @@ All settings are configured via the `.env` file. Copy `.env.example` to `.env` a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAX_RETRIES` | `3` | Maximum retry attempts for failed operations |
-| `RETRY_DELAY` | `2000` | Base delay between retries in milliseconds |
-| `MAX_RETRY_COUNT` | `3` | Maximum retry attempts for Stage 1 page failures (checkpoint system) |
+| `MAX_RETRIES` | `3` | Maximum retry attempts for failed operations (internal retry within processJobURL) |
+| `RETRY_DELAY` | `2000` | Base delay between retries in milliseconds (exponential backoff) |
+| `MAX_RETRY_COUNT` | `3` | Maximum retry attempts for Stage 1 page failures and Stage 3 job extraction failures (checkpoint system) |
 
 ### Output
 
@@ -175,7 +206,7 @@ Stage 1 queries Google Custom Search API with your search query (e.g., `site:boa
 ### Stage 2 & 3
 
 2. **Stage 2** reads job board URLs from Stage 1's output, visits each URL using Puppeteer, and extracts all job posting links with checkpoint support
-3. **Stage 3** visits each job URL from Stage 2 and extracts detailed information
+3. **Stage 3** reads job URLs from Stage 2's output, visits each URL, extracts detailed job information
 
 All stages support:
 - **Deduplication**: Running multiple times won't create duplicate entries
@@ -252,6 +283,58 @@ All stages support:
 - Re-run Stage 2 with the same jobId to retry failed URLs
 - Common causes: page load timeouts, changed page structure, rate limiting
 
+### Stage 3 Issues
+
+#### Missing --run Parameter
+
+**Error**: `Stage 3 requires --run parameter. Usage: npm start -- --stage=3 --run={jobId} [--id={extractionId}] [--force]`
+
+**Solution**:
+- Stage 3 requires a `--run` parameter to specify which Stage 2 output to read
+- Example: `npm start -- --stage=3 --run=nov_03_crawl`
+
+#### Job ID Not Found
+
+**Error**: `Job ID 'xyz' not found at output/job_links/xyz`
+
+**Solution**:
+- Verify the jobId exists by checking `output/job_links/` folder
+- Run Stage 2 first: `npm start -- --stage=2 --run=some_request --id=xyz`
+- Check for typos in the --run parameter
+
+#### No Jobs in jobs.csv
+
+**Message**: `No jobs found in jobs.csv`
+
+**Solution**:
+- Stage 2 may not have extracted any job URLs
+- Check `output/job_links/{jobId}/jobs.csv` to verify it has content
+- Re-run Stage 2 if needed
+
+#### Max Retry Limit Reached for Jobs
+
+**Message**: `Skipped {count} URLs that reached max retry count (3)`
+
+**Info**: Jobs that failed 3 times are automatically skipped to prevent infinite loops.
+
+**Solution**:
+- Check `output/jobs/{extractionId}/report.json` for error details
+- Use `--force` flag to retry all failed URLs: `npm start -- --stage=3 --run=xyz --id=abc --force`
+- Common causes: invalid URLs, page structure changes, anti-bot protection, navigation timeouts
+- Consider updating selectors in `.env` if extraction logic fails consistently
+
+#### Extraction Validation Failures
+
+**Error**: `Validation failed for {url}: Failed to extract valid content`
+
+**Info**: Extraction succeeded but validation failed (e.g., title is empty or "N/A").
+
+**Solution**:
+- Check if the page structure has changed
+- Update selectors in `.env` (JOB_TITLE_SELECTORS, JOB_DESCRIPTION_SELECTORS, etc.)
+- Some URLs may be listing pages or invalid job pages
+- Review failed URLs in `output/jobs/{extractionId}/report.json`
+
 ### Google API Issues
 
 #### Google API Quota Exceeded
@@ -315,21 +398,24 @@ cp .env.example .env
 # Edit .env with your Google API credentials
 
 # 2. Run Stage 1 to find job listing pages
-npm start -- --stage=1 --id=nov_03_gh
-# Output: output/job_boards/nov_03_gh/google-results.csv with job board URLs
-#         output/job_boards/nov_03_gh/report.json with progress tracking
+npm start -- --stage=1 --id=nov_04_gh
+# Output: output/job_boards/nov_04_gh/google-results.csv with job board URLs
+#         output/job_boards/nov_04_gh/report.json with progress tracking
 
 # 3. Run Stage 2 to extract job links
-npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl
-# Output: output/job_links/nov_03_crawl/jobs.csv with direct job URLs
-#         output/job_links/nov_03_crawl/report.json with extraction progress
+npm start -- --stage=2 --run=nov_04_gh --id=nov_04_crawl
+# Output: output/job_links/nov_04_crawl/jobs.csv with direct job URLs
+#         output/job_links/nov_04_crawl/report.json with extraction progress
 
 # 4. Run Stage 3 to get job details
-npm start -- --stage=3
-# Output: output/jobs_data.csv with complete job information
+npm start -- --stage=3 --run=nov_04_crawl --id=nov_04_extraction
+# Output: output/jobs/nov_04_extraction/{companyName}/{number}.txt files
+#         output/jobs/nov_04_extraction/report.json with extraction details
 
-# Or run everything at once:
-npm start
+# Or run stages individually with control (recommended):
+npm start -- --stage=1 --id=nov_04_gh
+npm start -- --stage=2 --run=nov_04_gh --id=nov_04_crawl
+npm start -- --stage=3 --run=nov_04_crawl --id=nov_04_extraction
 ```
 
 ### Advanced Stage 1 Usage
@@ -420,6 +506,30 @@ npm start -- --stage=2 --run=nov_03_gh --id=second_extraction
 # Each has its own folder: output/job_links/first_extraction/ and output/job_links/second_extraction/
 ```
 
+### Advanced Stage 3 Usage
+
+```bash
+# Run Stage 3 with custom extractionId and jobId
+npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction
+
+# Run Stage 3 with auto-generated extractionId
+npm start -- --stage=3 --run=nov_03_crawl
+# Output: "No extractionId provided. Generated extractionId: 789012"
+
+# Resume after partial completion (automatic)
+npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction
+# Output: "Jobs to process: 150, Already completed: 50"
+
+# Force mode: retry only failed URLs (ignore retry count)
+npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction --force
+# Output: "Force mode: Processing only failed URLs (ignoring retry count)"
+
+# Multiple extractions can coexist for same jobId
+npm start -- --stage=3 --run=nov_03_crawl --id=first_run
+npm start -- --stage=3 --run=nov_03_crawl --id=second_run
+# Each has its own folder: output/jobs/first_run/ and output/jobs/second_run/
+```
+
 ### Handling Stage 2 Failures
 
 **Scenario 1: Some Job Boards Fail**
@@ -442,6 +552,50 @@ npm start -- --stage=2 --run=nov_03_gh --id=my_crawl
 npm start -- --stage=2 --run=nov_03_gh --id=my_crawl --clean
 # Output: "Clean flag detected. Reset 10 job board URLs to pending"
 #         Processes all URLs again, adds new job links to existing jobs.csv
+```
+
+### Handling Stage 3 Failures
+
+**Scenario 1: Some Job Extractions Fail**
+```bash
+# Run Stage 3, some URLs fail during extraction
+npm start -- --stage=3 --run=nov_03_crawl --id=my_extraction
+# Output: "Validation failed for https://example.com/job/123: No structured data found"
+#         "✅ Stage 3 complete: 45 jobs saved"
+#         "Summary - Total processed: 50, Successful: 45, Failed: 5"
+#         jobs.csv shows failed URLs with STATUS='failed' and RETRY=1
+
+# Resume to retry failed URLs (automatic)
+npm start -- --stage=3 --run=nov_03_crawl --id=my_extraction
+# Only processes the 5 failed URLs, increments RETRY to 2
+```
+
+**Scenario 2: Max Retry Limit Reached**
+```bash
+# After 3 failed attempts, URLs are skipped
+npm start -- --stage=3 --run=nov_03_crawl --id=my_extraction
+# Output: "Skipped 2 URLs that reached max retry count (3)"
+#         Only processes URLs with RETRY < 3
+
+# Use force mode to retry all failed URLs
+npm start -- --stage=3 --run=nov_03_crawl --id=my_extraction --force
+# Output: "Force mode: Processing only failed URLs (ignoring retry count)"
+#         Retries all failed URLs regardless of retry count
+```
+
+**Scenario 3: Check Extraction Results**
+```bash
+# View organized job files
+ls output/jobs/my_extraction/
+# Output: affirm/  google/  stripe/  report.json
+
+# View jobs for specific company
+ls output/jobs/my_extraction/affirm/
+# Output: 1.txt  2.txt  3.txt  4.txt  5.txt
+
+# Check detail extraction report
+cat output/jobs/my_extraction/report.json
+# Shows passed/failed URLs organized by company
 ```
 
 ## Project Structure
@@ -470,8 +624,8 @@ job-crawler-bot/
 │   │   ├── index.js                  # Utils index
 │   │   ├── job-links.js              # Job link processing
 │   │   ├── logger.js                 # Logging utility
-│   │   ├── process-job-url.js        # URL processing
-│   │   └── request-helpers.js        # Request/Job ID and checkpoint management
+│   │   ├── process-job-url.js        # URL processing with retry logic
+│   │   └── request-helpers.js        # Request/Job/Extraction ID and checkpoint management
 │   └── validators/
 │       ├── content-validator.js      # Content validation
 │       └── index.js                  # Validators index
@@ -482,14 +636,19 @@ job-crawler-bot/
 │   │       └── report.json           # Progress tracking for checkpoint/resume
 │   ├── job_links/                    # Stage 2 results
 │   │   └── {jobId}/                  # Per job ID folder
-│   │       ├── jobs.csv              # Extracted job posting URLs
+│   │       ├── jobs.csv              # Extracted job URLs
 │   │       └── report.json           # Link extraction progress tracking
-│   └── jobs_data.csv                 # Stage 3 results (job details)
-│   └── jobs_data.csv                 # Stage 3 results
-├── .env                              # Your environment variables (gitignored)
-├── .env.example                      # Environment variable template
-├── STAGE1_STORY.md                   # Stage 1 implementation documentation
-├── STAGE2_STORY.md                   # Stage 2 implementation documentation
+│   └── jobs/                         # Stage 3 results
+│       └── {extractionId}/           # Per extraction ID folder
+│           ├── {companyName}/        # Company-specific folders
+│           │   ├── 1.txt             # Job details (formatted text)
+│           │   ├── 2.txt
+│           │   └── ...
+│           └── report.json            # Detail extraction report per company
+├── .env                               # Your environment variables (gitignored)
+├── .env.example                       # Environment variable template
+├── STAGE1_STORY.md                    # Stage 1 implementation documentation
+├── STAGE2_STORY.md                    # Stage 2 implementation documentation
 ├── package.json
 └── README.md
 ```

@@ -176,7 +176,6 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
         }
 
         const reason = lastError.message || 'Unknown extraction error';
-        const fullError = lastError || 'Unknown extraction error';
 
         if (listingFound > 0 && listingSuccesses === 0) {
             log.error(`Listing detected at ${url} but no job details extracted from its new links.`);
@@ -209,7 +208,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
 
             detailReport.detail_extraction_report[companyName].failedUrls.push({
                 url: url,
-                reason: fullError
+                reason: reason
             });
 
             saveDetailReport(reportPath, detailReport);
