@@ -35,7 +35,7 @@ cp .env.example .env
 npm start
 ```
 
-**Note**: Running without parameters will execute Stage 1 with an auto-generated ID, but Stage 2 and Stage 3 require explicit IDs from previous stages. It's recommended to run stages individually with specific IDs for better control:
+**Note**: You can also run the stages separately:
 
 ```bash
 # Recommended workflow:

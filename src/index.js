@@ -47,9 +47,9 @@ const parseArgs = () => {
                 process.exit(1);
             }
         } else {
-            await runStage1({ requestId, clean });
-            await runStage2();
-            await runStage3();
+            const stage1Id = await runStage1({ requestId, clean });
+            const stage2Id = await runStage2({ requestId: stage1Id, clean });
+            await runStage3({ runId: stage2Id, force });
         }
 
         const endTime = Date.now();

@@ -207,6 +207,8 @@ const runStage2 = async (options = {}) => {
     // Final summary
     log.success(`✅ Stage 2 complete for jobId: ${jobId}`);
     log.info(`Job board URLs processed: ${urlsNeedingProcessing.length}\nTotal job links extracted: ${totalJobLinksExtracted}\nNew job links added: ${newJobLinksAdded}\nDuplicates skipped: ${duplicatesSkipped}\nFailed extractions: ${failedExtractions}\nResults saved to: ${jobsCsvPath}`);
+
+    return jobId;
 };
 
 module.exports = runStage2;

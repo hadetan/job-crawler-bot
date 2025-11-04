@@ -222,6 +222,8 @@ const runStage1 = async (options = {}) => {
     }
 
     log.info(`Summary - Total found: ${totalFound}, New: ${newRows.length}, Duplicates skipped: ${duplicatesSkipped}`);
+
+    return requestId;
 };
 
 module.exports = runStage1;

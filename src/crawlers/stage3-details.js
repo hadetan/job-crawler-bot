@@ -168,6 +168,8 @@ const runStage3 = async (options = {}) => {
             log.info(`  ${company}: ${count} jobs`);
         });
     }
+
+    return extractionId;
 };
 
 module.exports = runStage3;
