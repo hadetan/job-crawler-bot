@@ -3,50 +3,111 @@ const path = require('path');
 const fs = require('fs');
 const pLimit = require('p-limit');
 const config = require('../config');
+const log = require('../utils/logger');
 const {
-    readCSV,
-    normalizeURL,
-    log,
-    getProcessedJobs,
-} = require('../utils');
+    generateRequestId,
+    setupJobsFolder,
+    readJobsCsv,
+    loadDetailReport,
+    saveDetailReport
+} = require('../utils/request-helpers');
 const processJobURL = require('../utils/process-job-url');
 
-const runStage3 = async () => {
+const runStage3 = async (options = {}) => {
     log.info('Starting Stage 3: Job Details Extractor...');
 
-    const inputFile = path.join(config.output.dir, 'job_links.csv');
-    const jobsDir = path.join(config.output.dir, 'jobs');
+    // Validate --run parameter
+    if (!options.runId) {
+        log.error('Stage 3 requires --run parameter. Usage: npm start -- --stage=3 --run={jobId} [--id={extractionId}] [--force]');
+        process.exit(1);
+    }
 
-    const jobURLs = readCSV(inputFile, 'url');
-    if (jobURLs.length === 0) {
-        log.error('No job URLs found in job_links.csv. Run Stage 2 first.');
+    const jobId = options.runId;
+
+    const jobLinksDir = path.join(config.output.dir, 'job_links', jobId);
+    if (!fs.existsSync(jobLinksDir)) {
+        log.error(`Job ID '${jobId}' not found at ${jobLinksDir}`);
+        log.error('Please run Stage 2 first with this jobId or use an existing one.');
+        process.exit(1);
+    }
+
+    let extractionId = options.extractionId;
+    if (!extractionId) {
+        extractionId = generateRequestId();
+        log.info(`No extractionId provided. Generated extractionId: ${extractionId}`);
+    }
+
+    const { jobsDir, reportPath } = setupJobsFolder(config.output.dir, extractionId);
+
+    const isResume = fs.existsSync(reportPath);
+    if (isResume) {
+        log.info(`Resuming extraction from existing folder: ${extractionId}`);
+    }
+    log.info(`Extraction folder: ${jobsDir}`);
+
+    const jobsCsvPath = path.join(jobLinksDir, 'jobs.csv');
+    if (!fs.existsSync(jobsCsvPath)) {
+        log.error(`jobs.csv not found at ${jobsCsvPath}`);
+        process.exit(1);
+    }
+
+    const allJobs = readJobsCsv(jobsCsvPath);
+    if (allJobs.length === 0) {
+        log.info('No jobs found in jobs.csv');
         return;
     }
 
-    if (!fs.existsSync(jobsDir)) {
-        fs.mkdirSync(jobsDir, { recursive: true });
-    }
+    const maxRetryCount = config.retry.maxRetryCount;
+    let urlsToProcess = [];
+    let doneCount = 0;
+    let skippedMaxRetries = 0;
 
-    const processedJobs = getProcessedJobs(jobsDir);
-    let urlsToProcess = jobURLs.filter(url => !processedJobs.has(normalizeURL(url)));
+    if (options.force) {
+        // Force mode: only process failed URLs, ignore retry count
+        log.info('Force mode: Processing only failed URLs (ignoring retry count)');
+        urlsToProcess = allJobs.filter(job => job.STATUS.toLowerCase() === 'failed');
+    } else {
+        // Normal mode: process pending OR (failed with RETRY < MAX_RETRY_COUNT)
+        urlsToProcess = allJobs.filter(job => {
+            const status = job.STATUS.toLowerCase();
+            const retryCount = parseInt(job.RETRY, 10) || 0;
 
-    log.info(`Total jobs in CSV: ${jobURLs.length}`);
-    log.info(`Already processed: ${processedJobs.size}`);
-    log.info(`New jobs to process: ${urlsToProcess.length}`);
+            if (status === 'done') {
+                doneCount++;
+                return false;
+            }
 
-    if (jobURLs.length > urlsToProcess.length) {
-        const skippedCount = jobURLs.length - urlsToProcess.length;
-        log.info(`Skipping ${skippedCount} already-processed URLs (showing first 5):`);
-        const skipped = jobURLs.filter(url => processedJobs.has(normalizeURL(url))).slice(0, 5);
-        skipped.forEach(url => {
-            log.info(`  ✓ ${url} [normalized: ${normalizeURL(url)}]`);
+            if (status === 'pending') {
+                return true;
+            }
+
+            if (status === 'failed') {
+                if (retryCount >= maxRetryCount) {
+                    skippedMaxRetries++;
+                    return false;
+                }
+                return true;
+            }
+
+            return false;
         });
     }
 
+    log.info(`Total jobs in CSV: ${allJobs.length}`);
+    log.info(`Jobs to process: ${urlsToProcess.length}`);
+    log.info(`Already completed: ${doneCount}`);
+
+    if (skippedMaxRetries > 0) {
+        log.info(`Skipped (max retries): ${skippedMaxRetries}`);
+        log.info(`Skipping ${skippedMaxRetries} URLs that reached max retry count (${maxRetryCount})`);
+    }
+
     if (urlsToProcess.length === 0) {
-        log.info('Stage 3 complete: All jobs already processed');
+        log.info('No jobs to process. All jobs are either completed or have reached max retry count.');
         return;
     }
+
+    const detailReport = loadDetailReport(reportPath);
 
     const browser = await puppeteer.launch({
         headless: config.crawler.headless,
@@ -72,8 +133,21 @@ const runStage3 = async () => {
 
     const limit = pLimit(config.crawler.concurrency);
     await Promise.all(
-        urlsToProcess.map((url, index) =>
-            limit(() => processJobURL(browser, url, index, urlsToProcess.length, jobsDir, stats))
+        urlsToProcess.map((job, index) =>
+            limit(() => processJobURL(
+                browser,
+                job.URL,
+                index,
+                urlsToProcess.length,
+                jobsDir,
+                stats,
+                {
+                    jobsCsvPath,
+                    detailReport,
+                    reportPath,
+                    currentRetryCount: parseInt(job.RETRY, 10) || 0
+                }
+            ))
         )
     );
 
