@@ -192,10 +192,6 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             }
         }
 
-        const failedLogPath = path.join(jobsDir, 'failed_extractions.txt');
-        const contextMsg = listingFound > 0 ? `Listing page detected; new_links_found=${newLinksCount}, successes=${listingSuccesses}` : reason;
-        fs.appendFileSync(failedLogPath, `${url}\t${contextMsg}\n`, 'utf-8');
-
         stats.failedCount++;
 
         if (jobsCsvPath) {

@@ -8,8 +8,7 @@ const {
     generateRequestId,
     setupJobsFolder,
     readJobsCsv,
-    loadDetailReport,
-    saveDetailReport
+    loadDetailReport
 } = require('../utils/request-helpers');
 const processJobURL = require('../utils/process-job-url');
 
