@@ -39,7 +39,7 @@ const parseArgs = () => {
             if (stage === 1) {
                 await runStage1({ requestId, clean });
             } else if (stage === 2) {
-                await runStage2({ requestId: runId, jobId: requestId, clean });
+                await runStage2({ jobId: runId, jobId: requestId, clean });
             } else if (stage === 3) {
                 await runStage3({ runId: runId, extractionId: requestId, force: force });
             } else {

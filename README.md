@@ -48,7 +48,7 @@ npm start -- --stage=3 --run=my_crawl --id=my_extraction
 
 #### Stage 1: Google Search
 
-Stage 1 now supports request IDs, checkpointing, and resume functionality:
+Stage 1 supports request IDs, checkpointing, and resume functionality:
 
 ```bash
 # Run with auto-generated request ID

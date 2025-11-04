@@ -20,14 +20,14 @@ const runStage2 = async (options = {}) => {
     log.info('Starting Stage 2: Job Link Extractor...');
 
     // Validate --run parameter
-    if (!options.requestId) {
-        log.error('Stage 2 requires --run parameter. Usage: npm start -- --stage=2 --run={requestId} [--id={jobId}] [--clean]');
+    if (!options.jobId) {
+        log.error('Stage 2 requires --run parameter. Usage: npm start -- --stage=2 --run={jobId} [--id={jobId}] [--clean]');
         process.exit(1);
     }
 
-    const requestDir = path.join(config.output.dir, 'job_boards', options.requestId);
+    const requestDir = path.join(config.output.dir, 'job_boards', options.jobId);
     if (!fs.existsSync(requestDir)) {
-        log.error(`Stage 1 run '${options.requestId}' not found at ${requestDir}\nPlease run Stage 1 first with this requestId or use an existing one.`);
+        log.error(`Stage 1 run '${options.jobId}' not found at ${requestDir}\nPlease run Stage 1 first with this jobId or use an existing one.`);
         process.exit(1);
     }
 
