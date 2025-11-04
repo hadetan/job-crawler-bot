@@ -156,6 +156,11 @@ const runStage3 = async (options = {}) => {
     // Log summary
     log.success(`Stage 3 complete: ${stats.successCount} jobs saved to ${jobsDir}`);
     log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${stats.successCount}, Failed: ${stats.failedCount}`);
+    
+    if (skippedMaxRetries > 0) {
+        log.info(`URLs skipped (max retries reached): ${skippedMaxRetries}`);
+    }
+    
     log.info(`Extraction methods - Structured Data: ${stats.structuredCount}, Intelligent Analysis: ${stats.intelligentCount}`);
 
     if (Object.keys(stats.companyJobCounts).length > 0) {
