@@ -166,7 +166,7 @@ const setupJobLinksFolder = (outputDir, jobId) => {
     }
 
     if (!fs.existsSync(jobsCsvPath)) {
-        const csvHeaders = 'URL,STATUS,REMARKS,FILENAME\n';
+        const csvHeaders = 'URL,STATUS,REMARKS,FILENAME,RETRY\n';
         fs.writeFileSync(jobsCsvPath, csvHeaders, 'utf-8');
     }
 
@@ -338,7 +338,8 @@ const appendToJobsCsv = (csvPath, jobUrls) => {
             escapeCsvField(url),
             'pending',
             '',
-            ''
+            '',
+            '0'
         ].join(',');
     });
 
