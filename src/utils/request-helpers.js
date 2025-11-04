@@ -346,6 +346,151 @@ const appendToJobsCsv = (csvPath, jobUrls) => {
     fs.appendFileSync(csvPath, csvLines.join('\n') + '\n', 'utf-8');
 };
 
+/**
+ * Read jobs.csv and return array of job objects
+ * @param {string} csvPath - Path to jobs.csv
+ * @returns {Array<Object>} Array of job objects with URL, STATUS, REMARKS, FILENAME, RETRY
+ */
+const readJobsCsv = (csvPath) => {
+    if (!fs.existsSync(csvPath)) {
+        return [];
+    }
+
+    const content = fs.readFileSync(csvPath, 'utf-8');
+    const lines = content.split('\n');
+
+    if (lines.length < 2) {
+        return [];
+    }
+
+    const jobs = [];
+
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const fields = parseCSVLine(line);
+
+        if (fields.length >= 5) {
+            jobs.push({
+                URL: fields[0],
+                STATUS: fields[1],
+                REMARKS: fields[2],
+                FILENAME: fields[3],
+                RETRY: fields[4]
+            });
+        }
+    }
+
+    return jobs;
+};
+
+/**
+ * Write entire jobs.csv file (replaces existing)
+ * @param {string} csvPath - Path to jobs.csv
+ * @param {Array<Object>} jobs - Array of job objects with URL, STATUS, REMARKS, FILENAME, RETRY
+ */
+const writeJobsCsv = (csvPath, jobs) => {
+    const escapeCsvField = (field) => {
+        if (field === null || field === undefined) return '';
+        const str = String(field);
+        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+            return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+    };
+
+    const header = 'URL,STATUS,REMARKS,FILENAME,RETRY\n';
+    const csvLines = jobs.map(job => {
+        return [
+            escapeCsvField(job.URL),
+            escapeCsvField(job.STATUS),
+            escapeCsvField(job.REMARKS),
+            escapeCsvField(job.FILENAME),
+            escapeCsvField(job.RETRY)
+        ].join(',');
+    });
+
+    fs.writeFileSync(csvPath, header + csvLines.join('\n') + '\n', 'utf-8');
+};
+
+/**
+ * Update a single job's status in jobs.csv
+ * @param {string} csvPath - Path to jobs.csv
+ * @param {string} url - Job URL to update
+ * @param {string} status - New status (pending/done/failed)
+ * @param {string} remarks - Remarks/error message
+ * @param {string} filename - Filename where job was saved (e.g., "elixirr/1.txt")
+ * @param {string|number} retry - Retry count
+ */
+const updateJobStatus = (csvPath, url, status, remarks, filename, retry) => {
+    const jobs = readJobsCsv(csvPath);
+    
+    const jobIndex = jobs.findIndex(job => job.URL === url);
+    if (jobIndex !== -1) {
+        jobs[jobIndex].STATUS = status;
+        jobs[jobIndex].REMARKS = remarks;
+        jobs[jobIndex].FILENAME = filename;
+        jobs[jobIndex].RETRY = String(retry);
+    }
+    
+    writeJobsCsv(csvPath, jobs);
+};
+
+/**
+ * Load detail extraction report.json for Stage 3
+ * @param {string} reportPath - Path to report.json
+ * @returns {object} Report object
+ */
+const loadDetailReport = (reportPath) => {
+    if (!fs.existsSync(reportPath)) {
+        return { detail_extraction_report: {} };
+    }
+
+    try {
+        const content = fs.readFileSync(reportPath, 'utf-8');
+        return JSON.parse(content);
+    } catch (error) {
+        return { detail_extraction_report: {} };
+    }
+};
+
+/**
+ * Save detail extraction report.json for Stage 3
+ * @param {string} reportPath - Path to report.json
+ * @param {object} report - Report object to save
+ */
+const saveDetailReport = (reportPath, report) => {
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+};
+
+/**
+ * Setup jobs folder structure for Stage 3 and initialize files
+ * @param {string} outputDir - Base output directory
+ * @param {string} extractionId - Extraction ID for this Stage 3 run
+ * @returns {object} Object containing paths to jobs directory and report JSON
+ */
+const setupJobsFolder = (outputDir, extractionId) => {
+    const jobsDir = path.join(outputDir, 'jobs', extractionId);
+    const reportPath = path.join(jobsDir, 'report.json');
+
+    if (!fs.existsSync(jobsDir)) {
+        fs.mkdirSync(jobsDir, { recursive: true });
+    }
+
+    if (!fs.existsSync(reportPath)) {
+        const initialReport = {
+            detail_extraction_report: {}
+        };
+        fs.writeFileSync(reportPath, JSON.stringify(initialReport, null, 2), 'utf-8');
+    }
+
+    return {
+        jobsDir,
+        reportPath
+    };
+};
+
 module.exports = {
     generateRequestId,
     setupJobBoardsFolder,
@@ -359,5 +504,11 @@ module.exports = {
     readGoogleResultsCsv,
     writeGoogleResultsCsv,
     getExistingJobUrls,
-    appendToJobsCsv
+    appendToJobsCsv,
+    readJobsCsv,
+    writeJobsCsv,
+    updateJobStatus,
+    setupJobsFolder,
+    loadDetailReport,
+    saveDetailReport
 };
