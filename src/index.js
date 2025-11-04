@@ -1,6 +1,3 @@
-const fs = require('fs');
-const path = require('path');
-const config = require('./config');
 const log = require('./utils/logger');
 const runStage1 = require('./crawlers/stage1-search');
 const runStage2 = require('./crawlers/stage2-links');
@@ -12,6 +9,7 @@ const parseArgs = () => {
     const idArg = args.find(arg => arg.startsWith('--id='));
     const runArg = args.find(arg => arg.startsWith('--run='));
     const cleanFlag = args.includes('--clean');
+    const forceFlag = args.includes('--force');
 
     let stage = null;
     if (stageArg) {
@@ -28,34 +26,22 @@ const parseArgs = () => {
         runId = runArg.split('=')[1];
     }
 
-    return { stage, requestId, runId, clean: cleanFlag };
-};
-
-const validateInputFile = (filePath, stageName) => {
-    if (!fs.existsSync(filePath)) {
-        log.error(`Cannot run ${stageName} - ${filePath} not found. Run previous stage first.`);
-        process.exit(1);
-    }
+    return { stage, requestId, runId, clean: cleanFlag, force: forceFlag };
 };
 
 (async () => {
     const startTime = Date.now();
 
     try {
-        const { stage, requestId, runId, clean } = parseArgs();
+        const { stage, requestId, runId, clean, force } = parseArgs();
 
         if (stage !== null) {
             if (stage === 1) {
                 await runStage1({ requestId, clean });
             } else if (stage === 2) {
-                /**
-                 * --run specifies which Stage 1 output to read from (requestId)
-                 * --id specifies where to save Stage 2 results (jobId)
-                 */
                 await runStage2({ requestId: runId, jobId: requestId, clean });
             } else if (stage === 3) {
-                validateInputFile(path.join(config.output.dir, 'job_links.csv'), 'Stage 3');
-                await runStage3();
+                await runStage3({ runId: runId, extractionId: requestId, force: force });
             } else {
                 log.error(`Invalid stage '${stage}'. Valid stages are 1, 2, or 3.`);
                 process.exit(1);
