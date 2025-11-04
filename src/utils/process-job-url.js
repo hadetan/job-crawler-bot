@@ -40,7 +40,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
         depth = 0
     } = opts;
 
-    const maxRetries = 3;
+    const maxRetries = process.env.MAX_RETRIES || 3;
     let lastError = null;
     const companyName = extractCompanyName(url);
 
@@ -113,7 +113,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
 
             if (isRetryable && attempt < maxRetries - 1) {
                 const delay = 2000 * Math.pow(2, attempt);
-                log.warning(`Attempt ${attempt + 1} failed for ${url}, retrying in ${delay}ms...`);
+                log.info(`Attempt ${attempt + 1} failed for ${url}, retrying in ${delay}ms...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 continue;
             }
