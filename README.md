@@ -39,7 +39,7 @@ Runs Stage 1 → Stage 2 → Stage 3 in sequence.
 
 ### Run Individual Stages
 
-#### Stage 1: Google Search with Checkpointing
+#### Stage 1: Google Search
 
 Stage 1 now supports request IDs, checkpointing, and resume functionality:
 
@@ -66,10 +66,37 @@ npm start -- --stage=1 --id=nov_03_gh --clean
 - **Duplicate Handling**: Automatically skips duplicate URLs across pages
 - **API Limit Detection**: Gracefully handles Google's 100-result (10-page) limit
 
-#### Stage 2 & 3
+#### Stage 2: Job Link Extraction
+
+Stage 2 reads job board URLs from Stage 1 and extracts individual job posting links with checkpoint and resume functionality:
 
 ```bash
-npm start -- --stage=2    # Run only Stage 2 (extract job links)
+# Run with custom requestId and jobId
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl
+
+# Run with auto-generated jobId
+npm start -- --stage=2 --run=nov_03_gh
+
+# Resume from checkpoint (automatically detects)
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl
+
+# Reset job board URLs to pending and start fresh
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl --clean
+```
+
+**Stage 2 Features:**
+- **Job ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
+- **Request ID Required**: Must specify `--run={requestId}` to indicate which Stage 1 output to read
+- **Dedicated Folders**: Results saved in `/output/job_links/{jobId}/` with separate CSV and progress tracking
+- **Checkpoint & Resume**: Automatically resumes from unprocessed or failed job board URLs
+- **Clean Flag**: Reset job board URLs to pending with `--clean` (preserves extracted job links)
+- **Duplicate Handling**: Automatically skips duplicate job URLs across different job boards
+- **STATUS Updates**: Updates Stage 1's google-results.csv with completion status and job counts
+- **Error Recovery**: Continues processing remaining URLs even if some fail
+
+#### Stage 3
+
+```bash
 npm start -- --stage=3    # Run only Stage 3 (extract job details)
 ```
 
@@ -147,7 +174,7 @@ Stage 1 queries Google Custom Search API with your search query (e.g., `site:boa
 
 ### Stage 2 & 3
 
-2. **Stage 2** visits each URL from Stage 1 using Puppeteer and extracts all job posting links
+2. **Stage 2** reads job board URLs from Stage 1's output, visits each URL using Puppeteer, and extracts all job posting links with checkpoint support
 3. **Stage 3** visits each job URL from Stage 2 and extracts detailed information
 
 All stages support:
@@ -155,6 +182,7 @@ All stages support:
 - **Retry logic**: Failed requests are retried with exponential backoff
 - **Concurrency control**: Stages 2 & 3 process multiple pages in parallel
 - **Error handling**: Individual failures don't stop the entire process
+- **Checkpoint/Resume**: Automatically resume from failures or incomplete runs
 
 ## Troubleshooting
 
@@ -183,6 +211,46 @@ All stages support:
 **Message**: `Duplicates skipped: {count}`
 
 **Info**: This is normal behavior. Google search results may contain the same URL on different pages. The crawler automatically deduplicates to prevent redundant processing in later stages.
+
+### Stage 2 Issues
+
+#### Missing --run Parameter
+
+**Error**: `Stage 2 requires --run parameter. Usage: npm start -- --stage=2 --run={requestId} [--id={jobId}] [--clean]`
+
+**Solution**:
+- Stage 2 requires a `--run` parameter to specify which Stage 1 output to read
+- Example: `npm start -- --stage=2 --run=nov_03_gh`
+
+#### Stage 1 Run Not Found
+
+**Error**: `Stage 1 run 'xyz' not found at output/job_boards/xyz`
+
+**Solution**:
+- Verify the requestId exists by checking `output/job_boards/` folder
+- Run Stage 1 first: `npm start -- --stage=1 --id=xyz`
+- Check for typos in the --run parameter
+
+#### All Job Board URLs Already Completed
+
+**Message**: `All job board URLs completed for jobId {id}. Use --clean to reset.`
+
+**Solution**:
+- All job board URLs have been successfully processed
+- Use `--clean` to reset and re-extract: `npm start -- --stage=2 --run=xyz --id=abc --clean`
+- Or use a new jobId to create a separate extraction run
+
+#### Job Board Extraction Failures
+
+**Message**: `Failed to extract from {url}: {error}`
+
+**Info**: Stage 2 continues processing remaining URLs even if some fail. Check the final summary for failure count.
+
+**Solution**:
+- Check `output/job_links/{jobId}/report.json` for detailed error messages
+- Failed URLs are marked with STATUS='failed' in google-results.csv
+- Re-run Stage 2 with the same jobId to retry failed URLs
+- Common causes: page load timeouts, changed page structure, rate limiting
 
 ### Google API Issues
 
@@ -246,14 +314,15 @@ sudo apt-get install -y gconf-service libasound2 libatk1.0-0 libc6 libcairo2 lib
 cp .env.example .env
 # Edit .env with your Google API credentials
 
-# 2. Run Stage 1 to find job listing pages (with auto-generated ID)
-npm start -- --stage=1
-# Output: output/job_boards/123456/google-results.csv with job board URLs
-#         output/job_boards/123456/report.json with progress tracking
+# 2. Run Stage 1 to find job listing pages
+npm start -- --stage=1 --id=nov_03_gh
+# Output: output/job_boards/nov_03_gh/google-results.csv with job board URLs
+#         output/job_boards/nov_03_gh/report.json with progress tracking
 
 # 3. Run Stage 2 to extract job links
-npm start -- --stage=2
-# Output: output/job_links.csv with direct job URLs
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl
+# Output: output/job_links/nov_03_crawl/jobs.csv with direct job URLs
+#         output/job_links/nov_03_crawl/report.json with extraction progress
 
 # 4. Run Stage 3 to get job details
 npm start -- --stage=3
@@ -323,6 +392,58 @@ npm start -- --stage=1 --id=large_search
 # This is normal - Google limits Custom Search to 100 results per query
 ```
 
+### Advanced Stage 2 Usage
+
+```bash
+# Run Stage 2 with custom jobId and requestId
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl
+
+# Run Stage 2 with auto-generated jobId
+npm start -- --stage=2 --run=nov_03_gh
+# Output: "No jobId provided. Generated jobId: 456789"
+
+# Resume after partial completion (automatic)
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl
+# Output: "Resuming Stage 2: 5 URLs already processed, 3 URLs remaining"
+
+# Check if already complete
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl
+# Output: "All job board URLs completed for jobId nov_03_crawl. Use --clean to reset."
+
+# Reset job board URLs and re-extract
+npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl --clean
+# Output: "Clean flag detected. Reset 8 job board URLs to pending"
+
+# Multiple jobIds can coexist for same requestId
+npm start -- --stage=2 --run=nov_03_gh --id=first_extraction
+npm start -- --stage=2 --run=nov_03_gh --id=second_extraction
+# Each has its own folder: output/job_links/first_extraction/ and output/job_links/second_extraction/
+```
+
+### Handling Stage 2 Failures
+
+**Scenario 1: Some Job Boards Fail**
+```bash
+# Run Stage 2, some URLs fail during extraction
+npm start -- --stage=2 --run=nov_03_gh --id=my_crawl
+# Output: "Failed to extract from https://example.com/jobs: Navigation timeout"
+#         "✅ Stage 2 complete for jobId: my_crawl"
+#         "Failed extractions: 2"
+#         google-results.csv shows failed URLs with STATUS='failed'
+
+# Resume to retry failed URLs (automatic)
+npm start -- --stage=2 --run=nov_03_gh --id=my_crawl
+# Only processes the 2 failed URLs
+```
+
+**Scenario 2: Clean and Re-extract**
+```bash
+# You want to re-extract all job links from scratch
+npm start -- --stage=2 --run=nov_03_gh --id=my_crawl --clean
+# Output: "Clean flag detected. Reset 10 job board URLs to pending"
+#         Processes all URLs again, adds new job links to existing jobs.csv
+```
+
 ## Project Structure
 
 ```
@@ -350,20 +471,25 @@ job-crawler-bot/
 │   │   ├── job-links.js              # Job link processing
 │   │   ├── logger.js                 # Logging utility
 │   │   ├── process-job-url.js        # URL processing
-│   │   └── request-helpers.js        # Request ID and checkpoint management (Stage 1)
+│   │   └── request-helpers.js        # Request/Job ID and checkpoint management
 │   └── validators/
 │       ├── content-validator.js      # Content validation
 │       └── index.js                  # Validators index
 ├── output/                           # CSV output files (gitignored)
 │   ├── job_boards/                   # Stage 1 results
 │   │   └── {requestId}/              # Per request ID folder
-│   │       ├── google-results.csv    # Search results with metadata
+│   │       ├── google-results.csv    # Search results with STATUS tracking
 │   │       └── report.json           # Progress tracking for checkpoint/resume
-│   ├── job_links.csv                 # Stage 2 results
+│   ├── job_links/                    # Stage 2 results
+│   │   └── {jobId}/                  # Per job ID folder
+│   │       ├── jobs.csv              # Extracted job posting URLs
+│   │       └── report.json           # Link extraction progress tracking
+│   └── jobs_data.csv                 # Stage 3 results (job details)
 │   └── jobs_data.csv                 # Stage 3 results
 ├── .env                              # Your environment variables (gitignored)
 ├── .env.example                      # Environment variable template
 ├── STAGE1_STORY.md                   # Stage 1 implementation documentation
+├── STAGE2_STORY.md                   # Stage 2 implementation documentation
 ├── package.json
 └── README.md
 ```

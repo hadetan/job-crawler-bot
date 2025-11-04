@@ -81,8 +81,13 @@ const isJobDetailPage = (url) => {
         const pathname = urlObj.pathname.toLowerCase();
         const search = urlObj.search.toLowerCase();
         const params = urlObj.searchParams;
+        const fullUrl = url.toLowerCase();
 
-        // Generic job-board signal: Greenhouse job id in query
+        if (fullUrl.includes('gh_jid=')) {
+            return true;
+        }
+
+        // Generic job-board signal: Greenhouse job id in query params
         if (params.has('gh_jid')) {
             return true;
         }
@@ -150,29 +155,79 @@ const extractJobLinks = async (page, url, retryOrOpts = 0) => {
 
     try {
         await page.goto(url, {
-            waitUntil,
+            waitUntil: 'networkidle2',
             timeout: config.crawler.pageTimeout
         });
 
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(2000);
 
         let links = [];
+        let extractedFromIframe = false;
 
-        for (const selector of config.selectors.jobLinks) {
-            try {
-                const hrefs = await page.$$eval(selector, anchors =>
-                    anchors.map(a => a.href).filter(Boolean)
-                );
-                links.push(...hrefs);
-            } catch (error) { }
+        let greenhouseIframe = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const iframes = await page.$$('iframe');
+
+            for (const iframeElement of iframes) {
+                const iframeSrc = await page.evaluate(el => el.src, iframeElement);
+
+                if (iframeSrc && iframeSrc.includes('greenhouse.io/embed/job_board')) {
+                    greenhouseIframe = iframeElement;
+                    break;
+                }
+            }
+
+            if (greenhouseIframe) break;
+
+            await page.waitForTimeout(1000 + (attempt * 500));
         }
 
-        // Generic fallback: if selectors found nothing, scan all anchors
-        if (links.length === 0) {
+        if (greenhouseIframe) {
+            try {
+                await page.waitForTimeout(4000);
+
+                const frame = await greenhouseIframe.contentFrame();
+                if (frame) {
+                    try {
+                        await frame.waitForSelector('a', { timeout: 5000 });
+                    } catch { }
+
+                    for (const selector of config.selectors.jobLinks) {
+                        try {
+                            const hrefs = await frame.$$eval(selector, anchors =>
+                                anchors.map(a => a.href).filter(Boolean)
+                            );
+                            links.push(...hrefs);
+                        } catch (error) { }
+                    }
+
+                    if (links.length === 0) {
+                        try {
+                            const allHrefs = await frame.$$eval('a', anchors =>
+                                anchors.map(a => a.href).filter(Boolean)
+                            );
+                            links.push(...allHrefs);
+                        } catch (error) { }
+                    }
+
+                    if (links.length > 0) {
+                        extractedFromIframe = true;
+                    }
+                }
+            } catch (error) {
+                log.progress(`Failed to extract from iframe: ${error.message}`);
+            }
+        }
+
+        if (!extractedFromIframe) {
+            await page.waitForTimeout(3000);
+
             try {
                 const allHrefs = await page.$$eval('a', anchors => anchors.map(a => a.href).filter(Boolean));
                 links.push(...allHrefs);
-            } catch (error) { }
+            } catch (error) {
+                log.progress(`Failed to extract from main page: ${error.message}`);
+            }
         }
 
         const normalized = links

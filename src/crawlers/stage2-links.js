@@ -3,30 +3,31 @@ const path = require('path');
 const fs = require('fs');
 const pLimit = require('p-limit');
 const config = require('../config');
-const { readCSV, writeCSV, normalizeURL } = require('../utils/csv-handler');
 const log = require('../utils/logger');
 const { extractJobLinks } = require('../utils/job-links');
-const { 
-    generateRequestId, 
+const {
+    generateRequestId,
     setupJobLinksFolder,
-    jobIdExists,
     loadReport,
-    saveReport
+    saveReport,
+    readGoogleResultsCsv,
+    writeGoogleResultsCsv,
+    getExistingJobUrls,
+    appendToJobsCsv
 } = require('../utils/request-helpers');
 
 const runStage2 = async (options = {}) => {
-    log.info('Starting Stage 2: Job Listing Page Crawler...');
+    log.info('Starting Stage 2: Job Link Extractor...');
 
-    // Validate
-    if (!options.runId) {
+    // Validate --run parameter
+    if (!options.requestId) {
         log.error('Stage 2 requires --run parameter. Usage: npm start -- --stage=2 --run={requestId} [--id={jobId}] [--clean]');
         process.exit(1);
     }
 
-    const requestDir = path.join(config.output.dir, 'job_boards', options.runId);
+    const requestDir = path.join(config.output.dir, 'job_boards', options.requestId);
     if (!fs.existsSync(requestDir)) {
-        log.error(`Stage 1 run '${options.runId}' not found at ${requestDir}`);
-        log.error('Please run Stage 1 first with this requestId or use an existing one.');
+        log.error(`Stage 1 run '${options.requestId}' not found at ${requestDir}\nPlease run Stage 1 first with this requestId or use an existing one.`);
         process.exit(1);
     }
 
@@ -40,30 +41,69 @@ const runStage2 = async (options = {}) => {
     if (!jobId) {
         jobId = generateRequestId();
         log.info(`No jobId provided. Generated jobId: ${jobId}`);
-    } else {
-        if (jobIdExists(config.output.dir, jobId)) {
-            log.info(`Using existing jobId: ${jobId}`);
-        } else {
-            log.info(`Starting Stage 2 with jobId: ${jobId}, reading from requestId: ${options.runId}`);
-        }
     }
 
     const { jobLinksDir, jobsCsvPath, reportPath } = setupJobLinksFolder(config.output.dir, jobId);
-    log.info(`Starting Stage 2 with jobId: ${jobId}, reading from requestId: ${options.runId}\nJob links folder: ${jobLinksDir}`);
+    log.info(`Job links folder: ${jobLinksDir}`);
 
     const report = loadReport(reportPath);
+    if (!report.link_extraction_report) {
+        report.link_extraction_report = {};
+    }
 
-    const inputFile = path.join(config.output.dir, 'urls.csv');
-    const outputFile = path.join(config.output.dir, 'jobs.csv');
+    // Handle --clean flag
+    if (options.clean) {
+        log.info(`Clean flag detected. Resetting job board URLs to pending...`);
 
-    const urls = readCSV(inputFile, 'url');
-    if (urls.length === 0) {
-        log.error('No URLs found in urls.csv. Run Stage 1 first.');
+        const googleRows = readGoogleResultsCsv(googleResultsCsv);
+        let resetCount = 0;
+
+        googleRows.forEach(row => {
+            if (row.STATUS !== 'pending') {
+                row.STATUS = 'pending';
+                row.JOB_COUNT = '0';
+                row.REMARKS = '';
+                resetCount++;
+            }
+        });
+
+        writeGoogleResultsCsv(googleResultsCsv, googleRows);
+
+        report.link_extraction_report = {};
+        saveReport(reportPath, report);
+
+        log.info(`Clean flag detected. Reset ${resetCount} job board URLs to pending`);
+    }
+
+    const allGoogleRows = readGoogleResultsCsv(googleResultsCsv);
+    const urlsToProcess = allGoogleRows.filter(row => {
+        const status = row.STATUS.toLowerCase();
+        return status === 'pending' || status === 'failed';
+    });
+
+    if (urlsToProcess.length === 0) {
+        log.info(`All job board URLs completed for jobId ${jobId}. Use --clean to reset.`);
         return;
     }
 
-    const existingJobLinks = readCSV(outputFile, 'url').map(normalizeURL);
-    const existingSet = new Set(existingJobLinks);
+    const existingJobUrls = getExistingJobUrls(jobsCsvPath);
+
+    const urlsNeedingProcessing = urlsToProcess.filter(row => {
+        const url = row.URL;
+        const reportEntry = report.link_extraction_report[url];
+
+        return !reportEntry || reportEntry.status === false;
+    });
+
+    const alreadyProcessed = urlsToProcess.length - urlsNeedingProcessing.length;
+    if (alreadyProcessed > 0) {
+        log.info(`Resuming Stage 2: ${alreadyProcessed} URLs already processed, ${urlsNeedingProcessing.length} URLs remaining`);
+    }
+
+    if (urlsNeedingProcessing.length === 0) {
+        log.info(`All job board URLs completed for jobId ${jobId}. Use --clean to reset.`);
+        return;
+    }
 
     const browser = await puppeteer.launch({
         headless: config.crawler.headless,
@@ -80,51 +120,93 @@ const runStage2 = async (options = {}) => {
     });
 
     const limit = pLimit(config.crawler.concurrency);
-    const newJobLinks = [];
-    let totalLinksFound = 0;
+    let totalJobLinksExtracted = 0;
+    let newJobLinksAdded = 0;
     let duplicatesSkipped = 0;
-    let failedPages = 0;
+    let failedExtractions = 0;
+    let successfulExtractions = 0;
 
-    const processURL = async (url, index) => {
-        log.progress(`Processing page ${index + 1}/${urls.length}: ${url}`);
+    const processJobBoardURL = async (rowData, index) => {
+        const url = rowData.URL;
+        log.progress(`Processing job board ${index + 1} of ${urlsNeedingProcessing.length}: ${url}`);
+
         const page = await browser.newPage();
 
         try {
             await page.setUserAgent(config.crawler.userAgent);
             await page.setViewport({ width: 1920, height: 1080 });
 
-            const links = await extractJobLinks(page, url);
-            totalLinksFound += links.length;
+            const jobLinks = await extractJobLinks(page, url);
+            totalJobLinksExtracted += jobLinks.length;
 
-            links.forEach(link => {
-                const normalized = normalizeURL(link);
-                if (existingSet.has(normalized)) {
+            const newLinks = [];
+            jobLinks.forEach(jobUrl => {
+                if (existingJobUrls.has(jobUrl)) {
                     duplicatesSkipped++;
                 } else {
-                    existingSet.add(normalized);
-                    newJobLinks.push({ url: link });
+                    existingJobUrls.add(jobUrl);
+                    newLinks.push(jobUrl);
                 }
             });
+
+            if (newLinks.length > 0) {
+                appendToJobsCsv(jobsCsvPath, newLinks);
+                newJobLinksAdded += newLinks.length;
+            }
+
+            report.link_extraction_report[url] = {
+                status: true,
+                jobLinksFound: jobLinks.length,
+                error: null
+            };
+            saveReport(reportPath, report);
+
+            const googleRows = readGoogleResultsCsv(googleResultsCsv);
+            const rowToUpdate = googleRows.find(r => r.URL === url);
+            if (rowToUpdate) {
+                rowToUpdate.STATUS = 'completed';
+                rowToUpdate.JOB_COUNT = String(jobLinks.length);
+                writeGoogleResultsCsv(googleResultsCsv, googleRows);
+            }
+
+            successfulExtractions++;
+
         } catch (error) {
-            log.error(`Failed to process ${url}: ${error.message}`);
-            failedPages++;
+            log.error(`Failed to extract from ${url}: ${error.message}`);
+
+            report.link_extraction_report[url] = {
+                status: false,
+                jobLinksFound: 0,
+                error: error.message
+            };
+            saveReport(reportPath, report);
+
+            const googleRows = readGoogleResultsCsv(googleResultsCsv);
+            const rowToUpdate = googleRows.find(r => r.URL === url);
+            if (rowToUpdate) {
+                rowToUpdate.STATUS = 'failed';
+                rowToUpdate.REMARKS = error.message.substring(0, 100);
+                writeGoogleResultsCsv(googleResultsCsv, googleRows);
+            }
+
+            failedExtractions++;
+
         } finally {
             await page.close();
         }
     };
 
-    await Promise.all(urls.map((url, index) => limit(() => processURL(url, index))));
+    await Promise.all(
+        urlsNeedingProcessing.map((rowData, index) =>
+            limit(() => processJobBoardURL(rowData, index))
+        )
+    );
 
     await browser.close();
 
-    if (newJobLinks.length > 0) {
-        writeCSV(outputFile, newJobLinks, ['url']);
-        log.success(`Stage 2 complete: ${newJobLinks.length} new job links saved to ${outputFile}`);
-    } else {
-        log.info('Stage 2 complete: No new job links found');
-    }
-
-    log.info(`Summary - Total links found: ${totalLinksFound}, New: ${newJobLinks.length}, Duplicates skipped: ${duplicatesSkipped}, Failed pages: ${failedPages}`);
+    // Final summary
+    log.success(`✅ Stage 2 complete for jobId: ${jobId}`);
+    log.info(`Job board URLs processed: ${urlsNeedingProcessing.length}\nTotal job links extracted: ${totalJobLinksExtracted}\nNew job links added: ${newJobLinksAdded}\nDuplicates skipped: ${duplicatesSkipped}\nFailed extractions: ${failedExtractions}\nResults saved to: ${jobsCsvPath}`);
 };
 
 module.exports = runStage2;

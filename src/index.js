@@ -48,7 +48,11 @@ const validateInputFile = (filePath, stageName) => {
             if (stage === 1) {
                 await runStage1({ requestId, clean });
             } else if (stage === 2) {
-                await runStage2({ runId, jobId: requestId, clean });
+                /**
+                 * --run specifies which Stage 1 output to read from (requestId)
+                 * --id specifies where to save Stage 2 results (jobId)
+                 */
+                await runStage2({ requestId: runId, jobId: requestId, clean });
             } else if (stage === 3) {
                 validateInputFile(path.join(config.output.dir, 'job_links.csv'), 'Stage 3');
                 await runStage3();
