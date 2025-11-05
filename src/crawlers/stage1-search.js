@@ -106,7 +106,8 @@ const runStage1 = async (options = {}) => {
         log.info(`Resuming from page ${startPage} where previous run failed`);
     } else if (reportArray.length > 0) {
         const lastSuccessfulPage = Math.max(...reportArray.map(p => p.page));
-        if (lastSuccessfulPage >= config.crawler.maxPages) {
+        const maxPagesConfiguredCheck = (options.pages && Number.isInteger(options.pages) && options.pages > 0) ? options.pages : config.crawler.maxPages;
+        if (lastSuccessfulPage >= maxPagesConfiguredCheck) {
             log.info(`All pages already completed successfully for request ID ${requestId}. Use --clean to start fresh.`);
             return requestId;
         }
@@ -119,10 +120,12 @@ const runStage1 = async (options = {}) => {
     let totalFound = 0;
     let duplicatesSkipped = 0;
 
-    const providerMaxPages = provider.getMaxPages();
-    const effectiveMaxPages = Math.min(config.crawler.maxPages, providerMaxPages);
+    const maxPagesConfigured = (options.pages && Number.isInteger(options.pages) && options.pages > 0) ? options.pages : config.crawler.maxPages;
 
-    if (config.crawler.maxPages > providerMaxPages) {
+    const providerMaxPages = provider.getMaxPages();
+    const effectiveMaxPages = Math.min(maxPagesConfigured, providerMaxPages);
+
+    if (maxPagesConfigured > providerMaxPages) {
         log.warn(`⚠️  Provider ${provider.getName()} has a maximum of ${providerMaxPages} pages. Limiting to ${effectiveMaxPages} pages.`);
     }
 

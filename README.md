@@ -122,6 +122,12 @@ npm start -- --stage=1 --id=my-run --use=google
 
 # Reset progress and start fresh (keeps CSV data)
 npm start -- --stage=1 --id=my-run --use=serp --clean
+
+# Override max pages (ignores MAX_PAGES env variable)
+npm start -- --stage=1 --id=my-run --use=serp --engine=duckduckgo --pages=30
+
+# Combine with other options
+npm start -- --stage=1 --id=my-run --use=google --pages=8 --clean
 ```
 
 **Unified Folder Structure:**
@@ -144,6 +150,7 @@ Each folder contains:
 - **Unified Folder Structure**: All results in `/output/job_boards/{requestId}/` regardless of provider
 - **Engine-Specific Progress Tracking**: Each SerpAPI engine tracks its own pagination progress
 - **Request ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
+- **Page Override**: Use `--pages=N` to override the `MAX_PAGES` env variable for a specific run
 - **Checkpoint & Resume**: Automatically resumes from failed pages per engine without re-fetching successful pages
 - **Max Retry Limit**: Stops after 3 failed attempts (configurable via `MAX_RETRY_COUNT`)
 - **Clean Flag**: Reset progress per engine with `--clean` (e.g., `--use=serp --engine=bing --clean` only resets Bing)
@@ -207,6 +214,49 @@ npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction --force
 - **Detail Reports**: Tracks passed/failed URLs per company in report.json
 - **Comprehensive Logging**: Shows extraction methods, success rates, and company-wise job counts
 
+## CLI Options Reference
+
+### Common Options (All Stages)
+
+| Option | Description | Example | Applicable Stages |
+|--------|-------------|---------|-------------------|
+| `--stage=N` | Run specific stage (1, 2, or 3) | `--stage=1` | All |
+| `--id=VALUE` | Custom identifier for the run | `--id=my-run` | All |
+| `--clean` | Reset progress and start fresh | `--clean` | 1, 2 |
+| `--force` | Retry failed items ignoring retry limits | `--force` | 3 |
+
+### Stage 1 Specific Options
+
+| Option | Description | Example | Default |
+|--------|-------------|---------|---------|
+| `--use=PROVIDER` | Search provider to use (`google` or `serp`) | `--use=serp` | `google` |
+| `--engine=ENGINE` | Search engine (SerpAPI only: `google`, `bing`, `yahoo`, `duckduckgo`, etc.) | `--engine=bing` | `google` |
+| `--pages=N` | Override MAX_PAGES env variable | `--pages=30` | Uses `MAX_PAGES` from env |
+
+**Examples:**
+```bash
+# Override pages for a specific run
+npm start -- --stage=1 --id=big-search --use=serp --engine=bing --pages=50
+
+# Use default MAX_PAGES from env
+npm start -- --stage=1 --id=normal-search --use=google
+
+# Combine pages override with clean flag
+npm start -- --stage=1 --id=fresh-start --use=serp --pages=20 --clean
+```
+
+### Stage 2 Specific Options
+
+| Option | Description | Example | Required |
+|--------|-------------|---------|----------|
+| `--run=VALUE` | Request ID from Stage 1 | `--run=my-run` | Yes |
+
+### Stage 3 Specific Options
+
+| Option | Description | Example | Required |
+|--------|-------------|---------|----------|
+| `--run=VALUE` | Job ID from Stage 2 | `--run=my-jobs` | Yes |
+
 ## Environment Variables
 
 All settings are configured via the `.env` file. Copy `.env.example` to `.env` and customize:
@@ -227,7 +277,7 @@ All settings are configured via the `.env` file. Copy `.env.example` to `.env` a
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONCURRENCY` | `5` | Number of concurrent pages to process in Stages 2 & 3 |
-| `MAX_PAGES` | `10` | Number of pages to fetch from search provider |
+| `MAX_PAGES` | `10` | Number of pages to fetch from search provider (can be overridden with `--pages` CLI flag) |
 | `HEADLESS` | `true` | Run browser in headless mode (`true`/`false`) |
 | `PAGE_TIMEOUT` | `30000` | Page load timeout in milliseconds |
 | `USER_AGENT` | Mozilla string | User agent for Puppeteer |

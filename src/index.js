@@ -10,6 +10,7 @@ const parseArgs = () => {
     const runArg = args.find(arg => arg.startsWith('--run='));
     const useArg = args.find(arg => arg.startsWith('--use='));
     const engineArg = args.find(arg => arg.startsWith('--engine='));
+    const pagesArg = args.find(arg => arg.startsWith('--pages='));
     const cleanFlag = args.includes('--clean');
     const forceFlag = args.includes('--force');
 
@@ -38,18 +39,24 @@ const parseArgs = () => {
         searchEngine = engineArg.split('=')[1];
     }
 
-    return { stage, requestId, runId, provider, searchEngine, clean: cleanFlag, force: forceFlag };
+    let pages = null;
+    if (pagesArg) {
+        pages = parseInt(pagesArg.split('=')[1], 10);
+        if (isNaN(pages) || pages <= 0) pages = null;
+    }
+
+    return { stage, requestId, runId, provider, searchEngine, pages, clean: cleanFlag, force: forceFlag };
 };
 
 (async () => {
     const startTime = Date.now();
 
     try {
-        const { stage, requestId, runId, provider, searchEngine, clean, force } = parseArgs();
+        const { stage, requestId, runId, provider, searchEngine, pages, clean, force } = parseArgs();
 
         if (stage !== null) {
             if (stage === 1) {
-                await runStage1({ requestId, provider, searchEngine, clean });
+                await runStage1({ requestId, provider, searchEngine, pages, clean });
             } else if (stage === 2) {
                 await runStage2({ runId: runId, jobId: requestId, clean });
             } else if (stage === 3) {
