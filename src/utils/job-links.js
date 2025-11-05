@@ -19,39 +19,6 @@ const isATSHost = (hostname) => {
     return ATS_HOSTS.some(d => hostname === d || hostname.endsWith('.' + d));
 };
 
-/**
- * Extract actual job URL if the string contains multiple https://
- * @param {string} url - The URL that might contain an embedded job URL
- * @returns {string} - The extracted job URL or original URL
- */
-const extractEmbeddedJobURL = (url) => {
-    if (!url) return url;
-
-    try {
-        const httpsCount = (url.match(/https:\/\//g) || []).length;
-
-        if (httpsCount > 1) {
-            const firstIndex = url.indexOf('https://');
-            const secondIndex = url.indexOf('https://', firstIndex + 1);
-
-            if (secondIndex !== -1) {
-                const extractedUrl = url.substring(secondIndex);
-
-                try {
-                    new URL(extractedUrl);
-                    return extractedUrl;
-                } catch {
-                    return url;
-                }
-            }
-        }
-
-        return url;
-    } catch {
-        return url;
-    }
-};
-
 const isValidJobURL = (url) => {
     if (!url) return false;
     if (url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:')) {
@@ -261,9 +228,7 @@ const extractJobLinks = async (page, url, retryOrOpts = 0) => {
             .filter(isValidJobURL)
             .map(link => {
                 try {
-                    // Extract embedded job URL if this is a social sharing link
-                    const extractedUrl = extractEmbeddedJobURL(link);
-                    return new URL(extractedUrl, url).href;
+                    return new URL(link, url).href;
                 } catch {
                     return null;
                 }
@@ -290,6 +255,5 @@ module.exports = {
     isValidJobURL,
     extractJobId,
     isJobDetailPage,
-    extractJobLinks,
-    extractEmbeddedJobURL
+    extractJobLinks
 };
