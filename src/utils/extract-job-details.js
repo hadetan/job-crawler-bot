@@ -87,17 +87,21 @@ const extractJobDetails = async (page, url) => {
 
         if (iframeUrl) {
             const isJobBoardListing = iframeUrl.includes('embed/job_board');
+            const isJobApp = iframeUrl.includes('embed/job_app');
 
-            if (isJobBoardListing) {
-                const positionIdMatch = url.match(/positions?[\/:](\d+)/i) || url.match(/jobs?[\/:](\d+)/i) || url.match(/(\d{7,})/);
+            if (isJobBoardListing || isJobApp) {
+                const ghJidMatch = url.match(/[?&]gh_jid=(\d+)/i);
+                const positionIdMatch = url.match(/positions?[\/:](\d+)/i) || url.match(/jobs?[\/:](\d+)/i);
+                const fallbackIdMatch = url.match(/(\d{7,})/);
+
+                const jobId = ghJidMatch ? ghJidMatch[1] : (positionIdMatch ? positionIdMatch[1] : (fallbackIdMatch ? fallbackIdMatch[1] : null));
                 const companyMatch = iframeUrl.match(/for=([^&]+)/);
 
-                if (positionIdMatch && companyMatch) {
-                    const positionId = positionIdMatch[1];
+                if (jobId && companyMatch) {
                     const company = companyMatch[1];
-                    const constructedUrl = `https://job-boards.greenhouse.io/${company}/jobs/${positionId}`;
+                    const constructedUrl = `https://job-boards.greenhouse.io/${company}/jobs/${jobId}`;
 
-                    log.info(`Detected job_board iframe, trying constructed URL: ${constructedUrl}`);
+                    log.info(`Detected ${isJobBoardListing ? 'job_board' : 'job_app'} iframe, trying constructed URL: ${constructedUrl}`);
 
                     try {
                         await page.goto(constructedUrl, {
@@ -119,6 +123,7 @@ const extractJobDetails = async (page, url) => {
                                 h1Text.includes('all jobs'),
                                 h1Text.includes('positions archive'),
                                 h1Text.includes('open roles'),
+                                h1Text.includes('current openings'),
                                 (bodyText.match(/open roles/g) || []).length > 0 && bodyText.includes('showing') && bodyText.includes('results')
                             ];
 
@@ -150,7 +155,7 @@ const extractJobDetails = async (page, url) => {
                         iframeUrl = null;
                     }
                 } else {
-                    log.info(`Detected job_board iframe but couldn't construct direct URL, extracting from original page`);
+                    log.info(`Detected iframe but couldn't extract job ID from URL, extracting from original page`);
                     iframeUrl = null;
                 }
             } else {
