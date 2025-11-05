@@ -6,17 +6,24 @@
   "scripts": {
     "start": "node src/index.js"
   },
-  "keywords": ["crawler", "scraper", "jobs", "puppeteer", "google-search"],
+  "keywords": [
+    "crawler",
+    "scraper",
+    "jobs",
+    "puppeteer",
+    "google-search"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "puppeteer": "^21.0.0",
     "axios": "^1.6.0",
-    "dotenv": "^16.3.0",
+    "chalk": "^4.1.2",
     "csv-parse": "^5.5.0",
     "csv-stringify": "^6.4.0",
+    "dotenv": "^16.3.0",
+    "html-to-text": "^9.0.0",
     "p-limit": "^3.1.0",
-    "chalk": "^4.1.2",
-    "html-to-text": "^9.0.0"
+    "puppeteer": "^21.0.0",
+    "serpapi": "^2.2.1"
   }
 }

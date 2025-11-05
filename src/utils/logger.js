@@ -10,6 +10,10 @@ const log = {
         console.log(`[${getTimestamp()}] [INFO] ${message}`);
     },
 
+    warn: (message) => {
+        console.log(chalk.yellow(`[${getTimestamp()}] [WARN] ${message}`));
+    },
+
     success: (message) => {
         console.log(chalk.green(`[${getTimestamp()}] [SUCCESS] ${message}`));
     },

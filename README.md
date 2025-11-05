@@ -1,23 +1,35 @@
 # Job Crawler Bot
 
-A 3-stage job crawler system that discovers job listing pages via Google Custom Search API, extracts direct job links from those pages, and scrapes detailed job information. Built with Node.js and Puppeteer.
+A 3-stage job crawler system that discovers job listing pages via multiple search providers, extracts direct job links from those pages, and scrapes detailed job information. Built with Node.js and Puppeteer.
+
+> **🆕 New in v2.0**: Multi-provider search architecture! Now supports Google Custom Search API and SerpAPI with multiple search engines (Google, Bing, Yahoo, DuckDuckGo, etc.). Results are organized by provider for better tracking. See [MULTI_PROVIDER_GUIDE.md](MULTI_PROVIDER_GUIDE.md) for details.
 
 ## Features
 
-- **Stage 1**: Uses Google Custom Search API to find job listing page URLs based on custom queries
+- **Stage 1**: Multi-provider search architecture supporting:d - Complete usage guide
+✅ ARCHITECTURE.md - Visual architecture diagrams
+🧪 Test Results
+  - **Google Custom Search API** - Traditional Google search with up to 100 results
+  - **SerpAPI** - Multi-engine support (Google, Bing, Yahoo, DuckDuckGo, etc.)
+  - Provider-specific folder organization
 - **Stage 2**: Visits job listing pages with Puppeteer and extracts direct job posting links
 - **Stage 3**: Scrapes detailed job information (title, description, location, skills) from job pages
 - Full control via environment variables (concurrency, headless mode, timeouts, selectors)
 - Automatic deduplication across multiple runs
 - Retry logic with exponential backoff
 - CSV output for all stages
+- Checkpoint and resume functionality for all stages
 
 ## Prerequisites
 
 - Node.js 18.x or higher
-- Google Custom Search API credentials:
-  - API Key ([Get one here](https://developers.google.com/custom-search/v1/overview))
-  - Search Engine ID ([Create one here](https://programmablesearchengine.google.com/))
+- At least one search provider configured:
+  - **Option 1**: Google Custom Search API credentials
+    - API Key ([Get one here](https://developers.google.com/custom-search/v1/overview))
+    - Search Engine ID ([Create one here](https://programmablesearchengine.google.com/))
+  - **Option 2**: SerpAPI credentials
+    - API Key ([Sign up here](https://serpapi.com/))
+    - Supports multiple search engines (Google, Bing, Yahoo, DuckDuckGo, Baidu, Yandex)
 
 ## Installation
 
@@ -25,6 +37,43 @@ A 3-stage job crawler system that discovers job listing pages via Google Custom 
 npm install
 cp .env.example .env
 # Edit .env with your API credentials and settings
+```
+
+## Quick Start
+
+### With Google Custom Search
+
+```bash
+# 1. Add to .env:
+#    GOOGLE_API_KEY=your_key
+#    GOOGLE_SEARCH_ENGINE_ID=your_id
+#    SEARCH_QUERY=site:boards.greenhouse.io
+
+# 2. Run search
+npm start -- --stage=1 --id=my-search --use=google
+
+# 3. Extract job links
+npm start -- --stage=2 --run=my-search --id=my-jobs
+
+# 4. Get job details
+npm start -- --stage=3 --run=my-jobs
+```
+
+### With SerpAPI (Multi-Engine)
+
+```bash
+# 1. Add to .env:
+#    SERP_API_KEY=your_key
+#    SEARCH_QUERY=site:boards.greenhouse.io
+
+# 2. Run search with your preferred engine
+npm start -- --stage=1 --id=my-search --use=serp --engine=bing
+
+# 3. Extract job links (same as above)
+npm start -- --stage=2 --run=my-search --id=my-jobs
+
+# 4. Get job details (same as above)
+npm start -- --stage=3 --run=my-jobs
 ```
 
 ## Usage
@@ -46,32 +95,60 @@ npm start -- --stage=3 --run=my_crawl --id=my_extraction
 
 ### Run Individual Stages
 
-#### Stage 1: Google Search
+#### Stage 1: Search (Multi-Provider Support)
 
-Stage 1 supports request IDs, checkpointing, and resume functionality:
+Stage 1 supports multiple search providers with request IDs, checkpointing, and resume functionality:
+
+**Available Providers:**
+- `google` - Google Custom Search API (default, max 10 pages/100 results)
+- `serp` - SerpAPI with multi-engine support (Google, Bing, Yahoo, DuckDuckGo, etc.)
 
 ```bash
-# Run with auto-generated request ID
+# Use default provider (Google Custom Search)
 npm start -- --stage=1
 
-# Run with custom request ID
-npm start -- --stage=1 --id=nov_03_gh
+# Use Google Custom Search explicitly
+npm start -- --stage=1 --use=google
+
+# Use SerpAPI with Google engine
+npm start -- --stage=1 --use=serp
+
+# Use SerpAPI with Bing engine
+npm start -- --stage=1 --use=serp --engine=bing
+
+# Use SerpAPI with Yahoo engine
+npm start -- --stage=1 --use=serp --engine=yahoo
+
+# With custom request ID
+npm start -- --stage=1 --id=my-run --use=serp --engine=bing
 
 # Resume from failed page (automatically detects and resumes)
-npm start -- --stage=1 --id=nov_03_gh
+npm start -- --stage=1 --id=my-run --use=google
 
 # Reset progress and start fresh (keeps CSV data)
-npm start -- --stage=1 --id=nov_03_gh --clean
+npm start -- --stage=1 --id=my-run --use=serp --clean
 ```
 
+**Provider-Specific Folder Structure:**
+Results are now organized by provider:
+- Google Custom Search: `/output/job_boards/google/{requestId}/`
+- SerpAPI (Google): `/output/job_boards/serp/{requestId}/`
+- SerpAPI (Bing): `/output/job_boards/serp/{requestId}/`
+
+Each folder contains:
+- `google-results.csv` - Search results with URLs and metadata
+- `report.json` - Progress tracking with provider information
+
 **Stage 1 Features:**
+- **Multi-Provider Support**: Choose between Google Custom Search or SerpAPI
+- **Multi-Engine Support**: SerpAPI supports Google, Bing, Yahoo, DuckDuckGo, Baidu, Yandex
+- **Provider-Specific Organization**: Results organized in `/output/job_boards/{provider}/{requestId}/`
 - **Request ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
-- **Dedicated Folders**: Results saved in `/output/job_boards/{requestId}/` with separate CSV and progress tracking
 - **Checkpoint & Resume**: Automatically resumes from failed pages without re-fetching successful pages
 - **Max Retry Limit**: Stops after 3 failed attempts (configurable via `MAX_RETRY_COUNT`)
 - **Clean Flag**: Reset progress with `--clean` while preserving collected URLs
 - **Duplicate Handling**: Automatically skips duplicate URLs across pages
-- **API Limit Detection**: Gracefully handles Google's 100-result (10-page) limit
+- **Provider Metadata**: Stores provider and engine information in report.json
 
 #### Stage 2: Job Link Extraction
 
@@ -137,21 +214,34 @@ All settings are configured via the `.env` file. Copy `.env.example` to `.env` a
 
 ### Required Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `GOOGLE_API_KEY` | Your Google Custom Search API key | `AIzaSyD...` |
-| `GOOGLE_SEARCH_ENGINE_ID` | Your search engine ID | `a1b2c3d4e5...` |
-| `SEARCH_QUERY` | Search query to use | `site:boards.greenhouse.io` |
+| Variable | Description | Example | Required For |
+|----------|-------------|---------|--------------|
+| `GOOGLE_API_KEY` | Your Google Custom Search API key | `AIzaSyD...` | Google provider |
+| `GOOGLE_SEARCH_ENGINE_ID` | Your search engine ID | `a1b2c3d4e5...` | Google provider |
+| `SERP_API_KEY` | Your SerpAPI key | `abc123...` | SerpAPI provider |
+| `SEARCH_QUERY` | Search query to use | `site:boards.greenhouse.io` | All providers |
+
+**Note**: You need at least one provider configured (either Google Custom Search OR SerpAPI).
 
 ### Crawler Settings
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONCURRENCY` | `5` | Number of concurrent pages to process in Stages 2 & 3 |
-| `MAX_PAGES` | `10` | Number of pages to fetch from Google (10 results per page) |
+| `MAX_PAGES` | `10` | Number of pages to fetch from search provider |
 | `HEADLESS` | `true` | Run browser in headless mode (`true`/`false`) |
 | `PAGE_TIMEOUT` | `30000` | Page load timeout in milliseconds |
 | `USER_AGENT` | Mozilla string | User agent for Puppeteer |
+
+### Search Provider Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_SEARCH_PROVIDER` | `google` | Default provider if `--use` not specified (`google` or `serp`) |
+
+**Provider Limits:**
+- Google Custom Search: Maximum 10 pages (100 results) per query
+- SerpAPI: No hard page limit (depends on your plan)
 
 ### Retry Configuration
 
@@ -182,26 +272,45 @@ Customize CSS selectors for extracting data. Multiple selectors are tried in ord
 
 ## How It Works
 
-### Stage 1: Google Search with Checkpointing
+### Stage 1: Multi-Provider Search with Checkpointing
 
-Stage 1 queries Google Custom Search API with your search query (e.g., `site:boards.greenhouse.io`) and implements a robust checkpoint system:
+Stage 1 supports multiple search providers and implements a robust checkpoint system:
 
-1. **Request ID Assignment**: Each run gets a unique ID (auto-generated or custom)
-2. **Folder Creation**: Creates `/output/job_boards/{requestId}/` with `google-results.csv` and `report.json`
-3. **Page-by-Page Fetching**: Fetches up to 10 pages (100 results) from Google API
-4. **Progress Tracking**: Records success/failure of each page in `report.json`
-5. **Data Extraction**: Extracts URL, snippet, and logo from search results
-6. **Duplicate Detection**: Skips URLs already found in previous pages
-7. **Error Handling**: Saves error details for failed pages and supports resume
+**Provider Selection:**
+- Use `--use=google` for Google Custom Search API (default)
+- Use `--use=serp` for SerpAPI with `--engine` parameter (google, bing, yahoo, etc.)
+
+**Flow:**
+1. **Provider Validation**: Checks if selected provider is configured (API keys present)
+2. **Request ID Assignment**: Each run gets a unique ID (auto-generated or custom)
+3. **Folder Creation**: Creates `/output/job_boards/{provider}/{requestId}/`
+4. **Provider Initialization**: Creates appropriate provider instance with configuration
+5. **Page-by-Page Fetching**: Fetches up to MAX_PAGES from selected search engine
+6. **Progress Tracking**: Records success/failure of each page in `report.json` with provider info
+7. **Data Extraction**: Normalizes results to standard format (URL, snippet, logo, metadata)
+8. **Duplicate Detection**: Skips URLs already found in previous pages
+9. **Error Handling**: Saves error details for failed pages and supports resume
+
+**Provider Metadata in report.json:**
+```json
+{
+  "provider_info": {
+    "name": "serp",
+    "displayName": "SerpAPI (Bing)",
+    "searchEngine": "bing"
+  },
+  "google_report": [...]
+}
+```
 
 **Checkpoint/Resume Flow:**
 - If a page fails, the next run with the same `--id` automatically resumes from that page
 - Retry counter increments on each attempt (max 3 attempts by default)
 - Use `--clean` flag to reset progress and start from page 1
 
-**API Limit Handling:**
-- Google Custom Search API has a hard limit of 100 results (10 pages)
-- Crawler detects this limit and stops gracefully with a clear message
+**Provider-Specific Features:**
+- **Google Custom Search**: Hard limit of 100 results (10 pages), faster response
+- **SerpAPI**: No hard page limit, supports multiple engines, slower but more flexible
 
 ### Stage 2 & 3
 
@@ -218,6 +327,34 @@ All stages support:
 ## Troubleshooting
 
 ### Stage 1 Issues
+
+#### No Search Providers Configured
+
+**Message**: `❌ No search providers are configured!`
+
+**Solution**:
+- Add at least one API key to your `.env` file:
+  - For Google: `GOOGLE_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID`
+  - For SerpAPI: `SERP_API_KEY`
+
+#### Unknown or Unavailable Provider
+
+**Message**: `❌ Search provider 'xyz' is not configured or unavailable.`
+
+**Solution**:
+- Check available providers in the error message
+- Valid providers: `google` (Google Custom Search) or `serp` (SerpAPI)
+- Verify you have the required API keys in `.env`
+- Example: `npm start -- --stage=1 --use=google` or `npm start -- --stage=1 --use=serp`
+
+#### Invalid --engine Parameter
+
+**Warning**: `⚠️  Warning: --engine parameter is only supported with --use=serp. Ignoring.`
+
+**Solution**:
+- The `--engine` parameter only works with SerpAPI provider
+- Use: `npm start -- --stage=1 --use=serp --engine=bing`
+- Don't use `--engine` with Google Custom Search
 
 #### Request Already Completed
 
@@ -395,27 +532,47 @@ sudo apt-get install -y gconf-service libasound2 libatk1.0-0 libc6 libcairo2 lib
 ```bash
 # 1. Set up environment
 cp .env.example .env
-# Edit .env with your Google API credentials
+# Edit .env with your API credentials (Google Custom Search OR SerpAPI)
 
-# 2. Run Stage 1 to find job listing pages
+# 2. Run Stage 1 to find job listing pages (using default provider)
 npm start -- --stage=1 --id=nov_04_gh
-# Output: output/job_boards/nov_04_gh/google-results.csv with job board URLs
-#         output/job_boards/nov_04_gh/report.json with progress tracking
+# Output: output/job_boards/google/nov_04_gh/google-results.csv
+#         output/job_boards/google/nov_04_gh/report.json
+
+# 2a. Or use SerpAPI with Bing
+npm start -- --stage=1 --id=nov_04_bing --use=serp --engine=bing
+# Output: output/job_boards/serp/nov_04_bing/google-results.csv
+#         output/job_boards/serp/nov_04_bing/report.json
 
 # 3. Run Stage 2 to extract job links
 npm start -- --stage=2 --run=nov_04_gh --id=nov_04_crawl
-# Output: output/job_links/nov_04_crawl/jobs.csv with direct job URLs
-#         output/job_links/nov_04_crawl/report.json with extraction progress
+# Output: output/job_links/nov_04_crawl/jobs.csv
+#         output/job_links/nov_04_crawl/report.json
 
 # 4. Run Stage 3 to get job details
 npm start -- --stage=3 --run=nov_04_crawl --id=nov_04_extraction
-# Output: output/jobs/nov_04_extraction/{companyName}/{number}.txt files
-#         output/jobs/nov_04_extraction/report.json with extraction details
+# Output: output/jobs/nov_04_extraction/{companyName}/{number}.txt
+#         output/jobs/nov_04_extraction/report.json
+```
 
-# Or run stages individually with control (recommended):
-npm start -- --stage=1 --id=nov_04_gh
-npm start -- --stage=2 --run=nov_04_gh --id=nov_04_crawl
-npm start -- --stage=3 --run=nov_04_crawl --id=nov_04_extraction
+### Multi-Provider Examples
+
+```bash
+# Compare results from different providers
+npm start -- --stage=1 --id=google-run --use=google
+npm start -- --stage=1 --id=serp-google-run --use=serp --engine=google
+npm start -- --stage=1 --id=serp-bing-run --use=serp --engine=bing
+npm start -- --stage=1 --id=serp-yahoo-run --use=serp --engine=yahoo
+
+# Results are organized separately:
+# output/job_boards/google/google-run/
+# output/job_boards/serp/serp-google-run/
+# output/job_boards/serp/serp-bing-run/
+# output/job_boards/serp/serp-yahoo-run/
+
+# Use different engines for different searches
+npm start -- --stage=1 --id=tech-jobs --use=serp --engine=google
+npm start -- --stage=1 --id=marketing-jobs --use=serp --engine=bing
 ```
 
 ### Advanced Stage 1 Usage
@@ -606,9 +763,15 @@ job-crawler-bot/
 │   ├── index.js                      # Main entry point
 │   ├── config.js                     # Environment variable loader
 │   ├── crawlers/
-│   │   ├── stage1-search.js          # Google Custom Search API crawler
+│   │   ├── stage1-search.js          # Multi-provider search crawler
 │   │   ├── stage2-links.js           # Job listing page crawler
 │   │   └── stage3-details.js         # Job details extractor
+│   ├── search-providers/             # Search provider implementations
+│   │   ├── base-provider.js          # Abstract provider interface
+│   │   ├── google-custom-search.js   # Google Custom Search provider
+│   │   ├── serp-api.js               # SerpAPI provider
+│   │   ├── provider-factory.js       # Provider factory
+│   │   └── index.js                  # Provider exports
 │   ├── extractors/
 │   │   ├── index.js                  # Extractor utilities
 │   │   ├── intelligent-analysis.js   # AI-based job data extraction
@@ -630,10 +793,15 @@ job-crawler-bot/
 │       ├── content-validator.js      # Content validation
 │       └── index.js                  # Validators index
 ├── output/                           # CSV output files (gitignored)
-│   ├── job_boards/                   # Stage 1 results
-│   │   └── {requestId}/              # Per request ID folder
-│   │       ├── google-results.csv    # Search results with STATUS tracking
-│   │       └── report.json           # Progress tracking for checkpoint/resume
+│   ├── job_boards/                   # Stage 1 results (organized by provider)
+│   │   ├── google/                   # Google Custom Search results
+│   │   │   └── {requestId}/          # Per request ID folder
+│   │   │       ├── google-results.csv    # Search results with STATUS tracking
+│   │   │       └── report.json           # Progress tracking with provider info
+│   │   └── serp/                     # SerpAPI results
+│   │       └── {requestId}/          # Per request ID folder
+│   │           ├── google-results.csv    # Search results with STATUS tracking
+│   │           └── report.json           # Progress tracking with provider & engine info
 │   ├── job_links/                    # Stage 2 results
 │   │   └── {jobId}/                  # Per job ID folder
 │   │       ├── jobs.csv              # Extracted job URLs
@@ -647,8 +815,6 @@ job-crawler-bot/
 │           └── report.json            # Detail extraction report per company
 ├── .env                               # Your environment variables (gitignored)
 ├── .env.example                       # Environment variable template
-├── STAGE1_STORY.md                    # Stage 1 implementation documentation
-├── STAGE2_STORY.md                    # Stage 2 implementation documentation
 ├── package.json
 └── README.md
 ```

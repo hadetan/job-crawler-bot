@@ -1,62 +1,70 @@
-const axios = require('axios');
 const config = require('../config');
 const log = require('../utils/logger');
+const ProviderFactory = require('../search-providers/provider-factory');
 const { generateRequestId, setupJobBoardsFolder, loadReport, saveReport, requestIdExists, appendToGoogleResultsCsv, getExistingUrlsFromCsv } = require('../utils/request-helpers');
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-const fetchGoogleSearchResults = async (startIndex, retryCount = 0) => {
-    try {
-        const url = 'https://www.googleapis.com/customsearch/v1';
-        const params = {
-            key: config.google.apiKey,
-            cx: config.google.searchEngineId,
-            q: config.google.searchQuery,
-            start: startIndex,
-            num: 10,
-            lr: 'lang_en',
-            hl: 'en'
-        };
-
-        const response = await axios.get(url, { params, timeout: 10000 });
-        return response.data;
-    } catch (error) {
-        if (error.response?.status === 403) {
-            log.error('Google API quota exceeded or invalid credentials');
-            throw error;
-        }
-
-        if (error.response?.status === 400) {
-            throw error;
-        }
-
-        if (retryCount < config.retry.maxRetries) {
-            const delay = config.retry.retryDelay * (retryCount + 1);
-            log.progress(`Network error, retrying in ${delay}ms... (Attempt ${retryCount + 1}/${config.retry.maxRetries})`);
-            await sleep(delay);
-            return fetchGoogleSearchResults(startIndex, retryCount + 1);
-        }
-
-        throw error;
-    }
-};
-
 const runStage1 = async (options = {}) => {
-    log.info('Starting Stage 1: Google Custom Search...');
+    let providerName = options.provider || config.defaultSearchProvider;
+    const searchEngine = options.searchEngine;
+
+    let provider;
+    try {
+        // Validate --engine parameter usage
+        if (searchEngine && providerName !== 'serp') {
+            log.warn(`⚠️  Warning: --engine parameter is only supported with --use=serp. Ignoring.`);
+        }
+
+        const configuredProviders = ProviderFactory.getConfiguredProviders();
+        if (configuredProviders.length === 0) {
+            log.error('❌ No search providers are configured!\nPlease add at least one API key to your .env file:\n  - GOOGLE_API_KEY and GOOGLE_SEARCH_ENGINE_ID for Google Custom Search\n  - SERP_API_KEY for SerpAPI');
+            process.exit(1);
+        }
+
+        if (!ProviderFactory.isAvailable(providerName)) {
+            log.error(`❌ Search provider '${providerName}' is not configured or unavailable.`);
+            log.error('');
+            log.error('Available providers:');
+
+            const allProviders = ProviderFactory.getAvailableProviders();
+            allProviders.forEach(name => {
+                const providerInfo = ProviderFactory.getProviderInfo(name);
+                const status = providerInfo.available ? '✓' : '✗';
+                const extra = providerInfo.supportsEngineParam ? ' (supports --engine parameter)' : '';
+                log.error(`  ${status} ${name} - ${providerInfo.displayName}${extra}`);
+            });
+
+            log.error('Configured providers you can use:');
+            configuredProviders.forEach(name => {
+                const providerInfo = ProviderFactory.getProviderInfo(name);
+                const extra = providerInfo.supportsEngineParam ? ' (supports --engine parameter)' : '';
+                log.error(`  • ${name} - ${providerInfo.displayName}${extra}`);
+            });
+
+            process.exit(1);
+        }
+
+        provider = ProviderFactory.create(providerName, { engine: searchEngine });
+
+    } catch (error) {
+        log.error(`❌ Failed to initialize search provider: ${error.message}`);
+        process.exit(1);
+    }
+
+    log.info(`Starting Stage 1: ${provider.getDisplayName()}...`);
 
     let requestId = options.requestId;
     if (!requestId) {
         requestId = generateRequestId();
         log.info(`No ID provided. Generated request ID: ${requestId}`);
     } else {
-        if (requestIdExists(config.output.dir, requestId)) {
+        if (requestIdExists(config.output.dir, requestId, providerName)) {
             log.info(`Using existing request ID: ${requestId}`);
         } else {
             log.info(`Starting new Stage 1 run with request ID: ${requestId}`);
         }
     }
 
-    const { requestDir, csvPath, reportPath } = setupJobBoardsFolder(config.output.dir, requestId);
+    const { requestDir, csvPath, reportPath } = setupJobBoardsFolder(config.output.dir, requestId, providerName);
     log.info(`Request folder: ${requestDir}`);
 
     const report = loadReport(reportPath);
@@ -65,6 +73,17 @@ const runStage1 = async (options = {}) => {
     if (options.clean) {
         log.info(`Clean flag detected. Resetting progress for request ID ${requestId}`);
         report.google_report = [];
+        saveReport(reportPath, report);
+    }
+
+    if (!report.provider_info) {
+        report.provider_info = {
+            name: provider.getName(),
+            displayName: provider.getDisplayName()
+        };
+        if (provider.getName() === 'serp') {
+            report.provider_info.searchEngine = provider.getSearchEngine();
+        }
         saveReport(reportPath, report);
     }
 
@@ -89,9 +108,15 @@ const runStage1 = async (options = {}) => {
     let totalFound = 0;
     let duplicatesSkipped = 0;
 
-    for (let page = startPage; page <= config.crawler.maxPages; page++) {
-        const startIndex = (page - 1) * 10 + 1;
-        log.progress(`Fetching page ${page} of ${config.crawler.maxPages}...`);
+    const providerMaxPages = provider.getMaxPages();
+    const effectiveMaxPages = Math.min(config.crawler.maxPages, providerMaxPages);
+
+    if (config.crawler.maxPages > providerMaxPages) {
+        log.warn(`⚠️  Provider ${provider.getName()} has a maximum of ${providerMaxPages} pages. Limiting to ${effectiveMaxPages} pages.`);
+    }
+
+    for (let page = startPage; page <= effectiveMaxPages; page++) {
+        log.progress(`Fetching page ${page} of ${effectiveMaxPages}...`);
 
         let pageReport = report.google_report.find(p => p.page === page);
         const isRetry = pageReport !== undefined;
@@ -124,9 +149,9 @@ const runStage1 = async (options = {}) => {
         }
 
         try {
-            const data = await fetchGoogleSearchResults(startIndex);
+            const results = await provider.search(config.searchQuery, page);
 
-            if (!data.items || data.items.length === 0) {
+            if (!results || results.length === 0) {
                 log.info('No more results found, stopping pagination');
 
                 pageReport.status = true;
@@ -135,16 +160,10 @@ const runStage1 = async (options = {}) => {
                 break;
             }
 
-            data.items.forEach(item => {
-                const url = item.link;
-                // Extract description (snippet)
-                const snippet = item.snippet || '';
-
-                // Extract logo
-                let logoUrl = '';
-                if (item?.pagemap?.metatags.length > 0) {
-                    logoUrl = item.pagemap.metatags[0]['og:image'] || item?.pagemap?.cse_thumbnail?.[0].src;
-                }
+            results.forEach(result => {
+                const url = result.url;
+                const snippet = result.snippet || '';
+                const logoUrl = result.logoUrl || '';
 
                 if (existingUrlsInCsv.has(url)) {
                     duplicatesSkipped++;
@@ -183,27 +202,13 @@ const runStage1 = async (options = {}) => {
 
             saveReport(reportPath, report);
 
-            // Check if we hit the Google API 100-result limit
-            if (error.response?.status === 400) {
-                const errorMessage = error.response?.data?.error?.message || '';
-                const errorDetails = JSON.stringify(error.response?.data?.error?.errors || []);
-
-                if (startIndex > 91 || errorMessage.toLowerCase().includes('invalid value') ||
-                    errorDetails.toLowerCase().includes('start')) {
-                    log.info(`Reached Google API result limit (100 results/10 pages). Stopping pagination.`);
-                    break;
-                }
-
-                log.error(`Failed to fetch page ${page}: ${error.message}`);
-                break;
-            }
-
-            if (error.response?.status === 403) {
-                log.error(`Failed to fetch page ${page}: ${error.message}`);
-                break;
-            }
-
             log.error(`Failed to fetch page ${page}: ${error.message}`);
+
+            if (error.message.includes('quota exceeded') ||
+                error.message.includes('invalid credentials') ||
+                error.message.includes('API limit')) {
+                break;
+            }
         }
     }
 

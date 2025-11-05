@@ -13,10 +13,11 @@ const generateRequestId = () => {
  * Setup request folder structure and initialize files
  * @param {string} outputDir - Base output directory
  * @param {string} requestId - Request ID for this run
+ * @param {string} providerName - Name of the search provider (e.g., 'google', 'serp')
  * @returns {object} Object containing paths to CSV and JSON files
  */
-const setupJobBoardsFolder = (outputDir, requestId) => {
-    const requestDir = path.join(outputDir, 'job_boards', requestId);
+const setupJobBoardsFolder = (outputDir, requestId, providerName = 'google') => {
+    const requestDir = path.join(outputDir, 'job_boards', providerName, requestId);
     const csvPath = path.join(requestDir, 'google-results.csv');
     const reportPath = path.join(requestDir, 'report.json');
 
@@ -74,11 +75,34 @@ const saveReport = (reportPath, report) => {
  * Check if a request ID folder exists
  * @param {string} outputDir - Base output directory
  * @param {string} requestId - Request ID to check
+ * @param {string} providerName - Name of the search provider (optional)
  * @returns {boolean} True if folder exists
  */
-const requestIdExists = (outputDir, requestId) => {
-    const requestDir = path.join(outputDir, 'job_boards', requestId);
-    return fs.existsSync(requestDir);
+const requestIdExists = (outputDir, requestId, providerName = null) => {
+    if (providerName) {
+        const requestDir = path.join(outputDir, 'job_boards', providerName, requestId);
+        return fs.existsSync(requestDir);
+    }
+    
+    // Check in all provider folders if provider not specified
+    const jobBoardsDir = path.join(outputDir, 'job_boards');
+    if (!fs.existsSync(jobBoardsDir)) {
+        return false;
+    }
+    
+    // Check if any provider has this request ID
+    const providers = fs.readdirSync(jobBoardsDir, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name);
+    
+    for (const provider of providers) {
+        const requestDir = path.join(jobBoardsDir, provider, requestId);
+        if (fs.existsSync(requestDir)) {
+            return true;
+        }
+    }
+    
+    return false;
 };
 
 

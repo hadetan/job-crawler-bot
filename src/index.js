@@ -8,6 +8,8 @@ const parseArgs = () => {
     const stageArg = args.find(arg => arg.startsWith('--stage='));
     const idArg = args.find(arg => arg.startsWith('--id='));
     const runArg = args.find(arg => arg.startsWith('--run='));
+    const useArg = args.find(arg => arg.startsWith('--use='));
+    const engineArg = args.find(arg => arg.startsWith('--engine='));
     const cleanFlag = args.includes('--clean');
     const forceFlag = args.includes('--force');
 
@@ -26,18 +28,28 @@ const parseArgs = () => {
         runId = runArg.split('=')[1];
     }
 
-    return { stage, requestId, runId, clean: cleanFlag, force: forceFlag };
+    let provider = null;
+    if (useArg) {
+        provider = useArg.split('=')[1];
+    }
+
+    let searchEngine = null;
+    if (engineArg) {
+        searchEngine = engineArg.split('=')[1];
+    }
+
+    return { stage, requestId, runId, provider, searchEngine, clean: cleanFlag, force: forceFlag };
 };
 
 (async () => {
     const startTime = Date.now();
 
     try {
-        const { stage, requestId, runId, clean, force } = parseArgs();
+        const { stage, requestId, runId, provider, searchEngine, clean, force } = parseArgs();
 
         if (stage !== null) {
             if (stage === 1) {
-                await runStage1({ requestId, clean });
+                await runStage1({ requestId, provider, searchEngine, clean });
             } else if (stage === 2) {
                 await runStage2({ runId: runId, jobId: requestId, clean });
             } else if (stage === 3) {
@@ -47,7 +59,7 @@ const parseArgs = () => {
                 process.exit(1);
             }
         } else {
-            const stage1Id = await runStage1({ requestId, clean });
+            const stage1Id = await runStage1({ requestId, provider, searchEngine, clean });
             const stage2Id = await runStage2({ requestId: stage1Id, clean });
             await runStage3({ runId: stage2Id, force });
         }
