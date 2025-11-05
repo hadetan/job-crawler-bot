@@ -17,7 +17,7 @@ const generateRequestId = () => {
  */
 const setupJobBoardsFolder = (outputDir, requestId) => {
     const requestDir = path.join(outputDir, 'job_boards', requestId);
-    const csvPath = path.join(requestDir, 'google-results.csv');
+    const csvPath = path.join(requestDir, 'search-results.csv');
     const reportPath = path.join(requestDir, 'report.json');
 
     if (!fs.existsSync(requestDir)) {
@@ -96,7 +96,7 @@ const requestIdExists = (outputDir, requestId) => {
 
 
 /**
- * Append rows to google-results.csv
+ * Append rows to search-results.csv
  * @param {string} csvPath - Path to CSV file
  * @param {Array} rows - Array of row objects with URL, STATUS, JOB_COUNT, SNIPPET, LOGO_URL, REMARKS
 */
@@ -123,7 +123,7 @@ const appendToGoogleResultsCsv = (csvPath, rows) => {
 };
 
 /**
- * Read existing URLs from google-results.csv
+ * Read existing URLs from search-results.csv
  * @param {string} csvPath - Path to CSV file
  * @returns {Set} Set of normalized URLs already in CSV
  */
@@ -236,8 +236,8 @@ const parseCSVLine = (line) => {
 };
 
 /**
- * Read google-results.csv and return array of row objects
- * @param {string} csvPath - Path to google-results.csv
+ * Read search-results.csv and return array of row objects
+ * @param {string} csvPath - Path to search-results.csv
  * @returns {Array<Object>} Array of row objects with URL, STATUS, JOB_COUNT, SNIPPET, LOGO_URL, REMARKS
  */
 const readGoogleResultsCsv = (csvPath) => {
@@ -276,8 +276,8 @@ const readGoogleResultsCsv = (csvPath) => {
 };
 
 /**
- * Write entire google-results.csv file (replaces existing)
- * @param {string} csvPath - Path to google-results.csv
+ * Write entire search-results.csv file (replaces existing)
+ * @param {string} csvPath - Path to search-results.csv
  * @param {Array<Object>} rows - Array of row objects with URL, STATUS, JOB_COUNT, SNIPPET, LOGO_URL, REMARKS
  */
 const writeGoogleResultsCsv = (csvPath, rows) => {

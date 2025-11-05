@@ -135,7 +135,7 @@ All search results are saved in a unified folder regardless of provider:
 - `/output/job_boards/{requestId}/`
 
 Each folder contains:
-- `google-results.csv` - Search results with URLs and metadata
+- `search-results.csv` - Search results with URLs and metadata
 - `report.json` - Progress tracking with provider-specific arrays:
   - `google_report[]` - For Google Custom Search API
   - `serp_report{}` - For SerpAPI with engine-specific arrays:
@@ -181,7 +181,7 @@ npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl --clean
 - **Checkpoint & Resume**: Automatically resumes from unprocessed or failed job board URLs
 - **Clean Flag**: Reset job board URLs to pending with `--clean` (preserves extracted job links)
 - **Duplicate Handling**: Automatically skips duplicate job URLs across different job boards
-- **STATUS Updates**: Updates Stage 1's google-results.csv with completion status and job counts
+- **STATUS Updates**: Updates Stage 1's search-results.csv with completion status and job counts
 - **Error Recovery**: Continues processing remaining URLs even if some fail
 
 #### Stage 3: Job Details Extraction
@@ -483,7 +483,7 @@ All stages support:
 
 **Solution**:
 - Check `output/job_links/{jobId}/report.json` for detailed error messages
-- Failed URLs are marked with STATUS='failed' in google-results.csv
+- Failed URLs are marked with STATUS='failed' in search-results.csv
 - Re-run Stage 2 with the same jobId to retry failed URLs
 - Common causes: page load timeouts, changed page structure, rate limiting
 
@@ -603,19 +603,19 @@ cp .env.example .env
 
 # 2. Run Stage 1 to find job listing pages (using default provider)
 npm start -- --stage=1 --id=nov_04_gh
-# Output: output/job_boards/nov_04_gh/google-results.csv
+# Output: output/job_boards/nov_04_gh/search-results.csv
 #         output/job_boards/nov_04_gh/report.json
 
 # 2a. Or use SerpAPI with Bing
 npm start -- --stage=1 --id=nov_04_bing --use=serp --engine=bing
-# Output: output/job_boards/nov_04_bing/google-results.csv
+# Output: output/job_boards/nov_04_bing/search-results.csv
 #         output/job_boards/nov_04_bing/report.json
 
 # 2b. Or combine multiple engines in same requestId
 npm start -- --stage=1 --id=combined --use=google
 npm start -- --stage=1 --id=combined --use=serp --engine=bing
 npm start -- --stage=1 --id=combined --use=serp --engine=duckduckgo
-# Output: output/job_boards/combined/google-results.csv (combined results)
+# Output: output/job_boards/combined/search-results.csv (combined results)
 #         output/job_boards/combined/report.json (tracks each engine separately)
 
 # 3. Run Stage 2 to extract job links
@@ -788,7 +788,7 @@ npm start -- --stage=2 --run=nov_03_gh --id=my_crawl
 # Output: "Failed to extract from https://example.com/jobs: Navigation timeout"
 #         "✅ Stage 2 complete for jobId: my_crawl"
 #         "Failed extractions: 2"
-#         google-results.csv shows failed URLs with STATUS='failed'
+#         search-results.csv shows failed URLs with STATUS='failed'
 
 # Resume to retry failed URLs (automatic)
 npm start -- --stage=2 --run=nov_03_gh --id=my_crawl
@@ -887,7 +887,7 @@ job-crawler-bot/
 ├── output/                           # CSV output files (gitignored)
 │   ├── job_boards/                   # Stage 1 results (unified structure)
 │   │   └── {requestId}/              # Per request ID folder
-│   │       ├── google-results.csv    # Search results (combined from all providers engines)
+│   │       ├── search-results.csv    # Search results (combined from all providers engines)
 │   │       └── report.json           # Progress tracking:
 │   │                                 #   google_report[] - Google Custom Search pages
 │   │                                 #   serp_report.{engine}[] - SerpAPI engine-specific pages

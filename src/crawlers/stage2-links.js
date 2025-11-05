@@ -22,9 +22,9 @@ const runStage2 = async (options = {}) => {
         process.exit(1);
     }
 
-    const googleResultsCsv = path.join(requestDir, 'google-results.csv');
+    const googleResultsCsv = path.join(requestDir, 'search-results.csv');
     if (!fs.existsSync(googleResultsCsv)) {
-        log.error(`google-results.csv not found in ${requestDir}`);
+        log.error(`search-results.csv not found in ${requestDir}`);
         process.exit(1);
     }
 
