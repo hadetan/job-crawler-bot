@@ -135,6 +135,7 @@ const isJobDetailPage = (url) => {
             /#job-board/,              // Hash fragments to job boards
             /open-positions\/?$/,      // Generic "open positions" page
             /\/[a-z]{2}\/.*careers\/?$/,  // Localized pages ending in careers (e.g., /pt/careers/)
+            /\/(?:af|ar|bg|bn|ca|cs|da|de|el|es|et|fa|fi|fr|he|hi|hr|hu|id|it|ja|ko|lt|lv|ms|nl|no|pl|pt|ro|ru|sk|sl|sq|sr|sv|sw|ta|te|th|tr|uk|ur|vi|zh|zh-CN|zh-TW|pt-BR|pt-PT|es-ES|es-MX|fr-FR|fr-CA|en-GB|en-AU)\/(?:positions?|jobs?|careers?|opportunit)/i,  // Known locale codes followed by job-related paths
             /\/apply\/?$/,             // Application forms (when /apply is at the end)
             /\/(search|all|university)\/?$/,  // Search, "view all", university pages
             /\/departments?\/?$/,      // Department listing pages
