@@ -49,6 +49,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
 
         try {
             await page.setUserAgent(config.crawler.userAgent);
+            await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
             await page.setViewport({ width: 1920, height: 1080 });
 
             await page.setExtraHTTPHeaders({
@@ -133,33 +134,65 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             if (depth < 1) {
                 const page = await browser.newPage();
                 try {
-                    const links = await extractJobLinks(page, url, { waitUntil: 'networkidle2' });
-                    listingFound = Array.isArray(links) ? links.length : 0;
-                    await page.close();
+                    const isActualListingPage = await page.evaluate(() => {
+                        const title = document.title.toLowerCase();
+                        const h1 = document.querySelector('h1');
+                        const h1Text = h1 ? h1.textContent.toLowerCase() : '';
+                        const bodyText = document.body.textContent.toLowerCase();
 
-                    if (listingFound > 0) {
-                        const processedSet = getProcessedJobs(jobsDir);
-                        const uniqueLinks = Array.from(new Set(links.map(normalizeURL)))
-                            .filter(nu => !processedSet.has(nu));
-                        const cap = config.crawler.listingFollowLimit || 30;
-                        const toFollow = uniqueLinks.slice(0, cap).map(nu => links.find(l => normalizeURL(l) === nu));
-                        newLinksCount = toFollow.length;
+                        const listingIndicators = [
+                            title.includes('careers'),
+                            title.includes('jobs'),
+                            title.includes('openings'),
+                            title.includes('opportunities'),
+                            h1Text.includes('open positions'),
+                            h1Text.includes('job openings'),
+                            h1Text.includes('careers'),
+                            h1Text.includes('all jobs'),
+                            h1Text.includes('current openings'),
+                            (bodyText.match(/view job/gi) || []).length >= 3,
+                            (bodyText.match(/apply now/gi) || []).length >= 3,
+                            bodyText.includes('filter by') && bodyText.includes('location'),
+                            bodyText.includes('showing') && bodyText.includes('results') && bodyText.includes('jobs')
+                        ];
 
-                        if (newLinksCount === 0) {
-                            log.info(`Detected listing page but no new job links. Skipping.`);
-                            return;
+                        const indicatorCount = listingIndicators.filter(Boolean).length;
+
+                        return indicatorCount >= 2;
+                    });
+
+                    if (!isActualListingPage) {
+                        await page.close();
+                        listingFound = 0;
+                    } else {
+                        const links = await extractJobLinks(page, url, { waitUntil: 'networkidle2' });
+                        listingFound = Array.isArray(links) ? links.length : 0;
+                        await page.close();
+
+                        if (listingFound > 0) {
+                            const processedSet = getProcessedJobs(jobsDir);
+                            const uniqueLinks = Array.from(new Set(links.map(normalizeURL)))
+                                .filter(nu => !processedSet.has(nu));
+                            const cap = config.crawler.listingFollowLimit || 30;
+                            const toFollow = uniqueLinks.slice(0, cap).map(nu => links.find(l => normalizeURL(l) === nu));
+                            newLinksCount = toFollow.length;
+
+                            if (newLinksCount === 0) {
+                                log.info(`Detected listing page but no new job links. Skipping.`);
+                                return;
+                            }
+
+                            log.info(`Detected listing page. Following ${newLinksCount} new job links (depth 1).`);
+                            const before = stats.successCount;
+                            for (const link of toFollow) {
+                                await processJobURL(browser, link, 0, toFollow.length, jobsDir, stats, {
+                                    ...opts,
+                                    depth: depth + 1
+                                });
+                            }
+                            listingSuccesses = stats.successCount - before;
+                            handledViaListing = listingSuccesses > 0;
                         }
-
-                        log.info(`Detected listing page. Following ${newLinksCount} new job links (depth 1).`);
-                        const before = stats.successCount;
-                        for (const link of toFollow) {
-                            await processJobURL(browser, link, 0, toFollow.length, jobsDir, stats, {
-                                ...opts,
-                                depth: depth + 1
-                            });
-                        }
-                        listingSuccesses = stats.successCount - before;
-                        handledViaListing = listingSuccesses > 0;
                     }
                 } catch (e) {
                     try { await page.close(); } catch (_) { }

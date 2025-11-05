@@ -86,13 +86,82 @@ const extractJobDetails = async (page, url) => {
         }
 
         if (iframeUrl) {
-            log.info(`Detected iframe job board: ${iframeUrl.substring(0, 80)}...`);
-            await page.goto(iframeUrl, {
-                waitUntil: 'networkidle2',
-                timeout: Math.max(45000, config.crawler.pageTimeout)
-            });
-            await tryAcceptCookies(page);
-            await page.waitForTimeout(3000);
+            const isJobBoardListing = iframeUrl.includes('embed/job_board');
+
+            if (isJobBoardListing) {
+                const positionIdMatch = url.match(/positions?[\/:](\d+)/i) || url.match(/jobs?[\/:](\d+)/i) || url.match(/(\d{7,})/);
+                const companyMatch = iframeUrl.match(/for=([^&]+)/);
+
+                if (positionIdMatch && companyMatch) {
+                    const positionId = positionIdMatch[1];
+                    const company = companyMatch[1];
+                    const constructedUrl = `https://job-boards.greenhouse.io/${company}/jobs/${positionId}`;
+
+                    log.info(`Detected job_board iframe, trying constructed URL: ${constructedUrl}`);
+
+                    try {
+                        await page.goto(constructedUrl, {
+                            waitUntil: 'networkidle2',
+                            timeout: Math.max(45000, config.crawler.pageTimeout)
+                        });
+                        await tryAcceptCookies(page);
+                        await page.waitForTimeout(2000);
+
+                        const isActuallyListingPage = await page.evaluate(() => {
+                            const title = document.title.toLowerCase();
+                            const h1 = document.querySelector('h1');
+                            const h1Text = h1 ? h1.textContent.toLowerCase() : '';
+                            const bodyText = document.body.textContent.toLowerCase();
+
+                            const listingIndicators = [
+                                title.includes('positions archive'),
+                                title.includes('all jobs'),
+                                h1Text.includes('all jobs'),
+                                h1Text.includes('positions archive'),
+                                h1Text.includes('open roles'),
+                                (bodyText.match(/open roles/g) || []).length > 0 && bodyText.includes('showing') && bodyText.includes('results')
+                            ];
+
+                            return listingIndicators.some(indicator => indicator);
+                        });
+
+                        if (isActuallyListingPage) {
+                            log.info(`Constructed URL leads to listing page, extracting from original page instead`);
+                            await page.goto(url, {
+                                waitUntil: 'networkidle2',
+                                timeout: Math.max(45000, config.crawler.pageTimeout)
+                            });
+                            await tryAcceptCookies(page);
+                            await page.waitForTimeout(3000);
+                            iframeUrl = null;
+                        } else {
+                            log.info(`Constructed URL is valid, using it for extraction`);
+                            iframeUrl = constructedUrl;
+                        }
+                    } catch (e) {
+                        log.info(`Could not navigate to constructed URL: ${e.message}`);
+                        log.info(`Extracting from original page instead`);
+                        await page.goto(url, {
+                            waitUntil: 'networkidle2',
+                            timeout: Math.max(45000, config.crawler.pageTimeout)
+                        });
+                        await tryAcceptCookies(page);
+                        await page.waitForTimeout(3000);
+                        iframeUrl = null;
+                    }
+                } else {
+                    log.info(`Detected job_board iframe but couldn't construct direct URL, extracting from original page`);
+                    iframeUrl = null;
+                }
+            } else {
+                log.info(`Detected iframe job board: ${iframeUrl.substring(0, 80)}...`);
+                await page.goto(iframeUrl, {
+                    waitUntil: 'networkidle2',
+                    timeout: Math.max(45000, config.crawler.pageTimeout)
+                });
+                await tryAcceptCookies(page);
+                await page.waitForTimeout(3000);
+            }
         }
 
         const failureReasons = [];

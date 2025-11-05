@@ -1,15 +1,7 @@
 const axios = require('axios');
 const config = require('../config');
 const log = require('../utils/logger');
-const {
-    generateRequestId,
-    setupJobBoardsFolder,
-    loadReport,
-    saveReport,
-    requestIdExists,
-    appendToGoogleResultsCsv,
-    getExistingUrlsFromCsv
-} = require('../utils/request-helpers');
+const { generateRequestId, setupJobBoardsFolder, loadReport, saveReport, requestIdExists, appendToGoogleResultsCsv, getExistingUrlsFromCsv } = require('../utils/request-helpers');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -21,7 +13,9 @@ const fetchGoogleSearchResults = async (startIndex, retryCount = 0) => {
             cx: config.google.searchEngineId,
             q: config.google.searchQuery,
             start: startIndex,
-            num: 10
+            num: 10,
+            lr: 'lang_en',
+            hl: 'en'
         };
 
         const response = await axios.get(url, { params, timeout: 10000 });
@@ -74,7 +68,6 @@ const runStage1 = async (options = {}) => {
         saveReport(reportPath, report);
     }
 
-    // Resume from checkpoint - The page number where it failed, resume from there
     let startPage = 1;
     const firstFailedPage = report.google_report.find(p => p.status === false);
 
