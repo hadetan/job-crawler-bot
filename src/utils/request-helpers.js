@@ -13,11 +13,10 @@ const generateRequestId = () => {
  * Setup request folder structure and initialize files
  * @param {string} outputDir - Base output directory
  * @param {string} requestId - Request ID for this run
- * @param {string} providerName - Name of the search provider (e.g., 'google', 'serp')
  * @returns {object} Object containing paths to CSV and JSON files
  */
-const setupJobBoardsFolder = (outputDir, requestId, providerName = 'google') => {
-    const requestDir = path.join(outputDir, 'job_boards', providerName, requestId);
+const setupJobBoardsFolder = (outputDir, requestId) => {
+    const requestDir = path.join(outputDir, 'job_boards', requestId);
     const csvPath = path.join(requestDir, 'google-results.csv');
     const reportPath = path.join(requestDir, 'report.json');
 
@@ -27,7 +26,8 @@ const setupJobBoardsFolder = (outputDir, requestId, providerName = 'google') => 
 
     if (!fs.existsSync(reportPath)) {
         const initialReport = {
-            google_report: []
+            google_report: [],
+            serp_report: {}
         };
         fs.writeFileSync(reportPath, JSON.stringify(initialReport, null, 2), 'utf-8');
     }
@@ -51,14 +51,26 @@ const setupJobBoardsFolder = (outputDir, requestId, providerName = 'google') => 
  */
 const loadReport = (reportPath) => {
     if (!fs.existsSync(reportPath)) {
-        return { google_report: [] };
+        return { google_report: [], serp_report: {} };
     }
 
     try {
         const content = fs.readFileSync(reportPath, 'utf-8');
-        return JSON.parse(content);
+        const report = JSON.parse(content);
+
+        if (!report.google_report) report.google_report = [];
+
+        if (!report.serp_report) {
+            report.serp_report = {};
+        } else if (Array.isArray(report.serp_report)) {
+            report.serp_report = {
+                google: report.serp_report
+            };
+        }
+
+        return report;
     } catch (error) {
-        return { google_report: [] };
+        return { google_report: [], serp_report: {} };
     }
 };
 
@@ -75,34 +87,11 @@ const saveReport = (reportPath, report) => {
  * Check if a request ID folder exists
  * @param {string} outputDir - Base output directory
  * @param {string} requestId - Request ID to check
- * @param {string} providerName - Name of the search provider (optional)
  * @returns {boolean} True if folder exists
  */
-const requestIdExists = (outputDir, requestId, providerName = null) => {
-    if (providerName) {
-        const requestDir = path.join(outputDir, 'job_boards', providerName, requestId);
-        return fs.existsSync(requestDir);
-    }
-    
-    // Check in all provider folders if provider not specified
-    const jobBoardsDir = path.join(outputDir, 'job_boards');
-    if (!fs.existsSync(jobBoardsDir)) {
-        return false;
-    }
-    
-    // Check if any provider has this request ID
-    const providers = fs.readdirSync(jobBoardsDir, { withFileTypes: true })
-        .filter(dirent => dirent.isDirectory())
-        .map(dirent => dirent.name);
-    
-    for (const provider of providers) {
-        const requestDir = path.join(jobBoardsDir, provider, requestId);
-        if (fs.existsSync(requestDir)) {
-            return true;
-        }
-    }
-    
-    return false;
+const requestIdExists = (outputDir, requestId) => {
+    const requestDir = path.join(outputDir, 'job_boards', requestId);
+    return fs.existsSync(requestDir);
 };
 
 
@@ -449,7 +438,7 @@ const writeJobsCsv = (csvPath, jobs) => {
  */
 const updateJobStatus = (csvPath, url, status, remarks, filename, retry) => {
     const jobs = readJobsCsv(csvPath);
-    
+
     const jobIndex = jobs.findIndex(job => job.URL === url);
     if (jobIndex !== -1) {
         jobs[jobIndex].STATUS = status;
@@ -457,7 +446,7 @@ const updateJobStatus = (csvPath, url, status, remarks, filename, retry) => {
         jobs[jobIndex].FILENAME = filename;
         jobs[jobIndex].RETRY = String(retry);
     }
-    
+
     writeJobsCsv(csvPath, jobs);
 };
 

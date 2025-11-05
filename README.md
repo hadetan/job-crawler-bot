@@ -1,17 +1,12 @@
 # Job Crawler Bot
 
 A 3-stage job crawler system that discovers job listing pages via multiple search providers, extracts direct job links from those pages, and scrapes detailed job information. Built with Node.js and Puppeteer.
-
-> **🆕 New in v2.0**: Multi-provider search architecture! Now supports Google Custom Search API and SerpAPI with multiple search engines (Google, Bing, Yahoo, DuckDuckGo, etc.). Results are organized by provider for better tracking. See [MULTI_PROVIDER_GUIDE.md](MULTI_PROVIDER_GUIDE.md) for details.
-
 ## Features
 
-- **Stage 1**: Multi-provider search architecture supporting:d - Complete usage guide
-✅ ARCHITECTURE.md - Visual architecture diagrams
-🧪 Test Results
+- **Stage 1**: Multi-provider search architecture supporting:
   - **Google Custom Search API** - Traditional Google search with up to 100 results
   - **SerpAPI** - Multi-engine support (Google, Bing, Yahoo, DuckDuckGo, etc.)
-  - Provider-specific folder organization
+  - Unified folder structure with engine-specific progress tracking
 - **Stage 2**: Visits job listing pages with Puppeteer and extracts direct job posting links
 - **Stage 3**: Scrapes detailed job information (title, description, location, skills) from job pages
 - Full control via environment variables (concurrency, headless mode, timeouts, selectors)
@@ -129,26 +124,30 @@ npm start -- --stage=1 --id=my-run --use=google
 npm start -- --stage=1 --id=my-run --use=serp --clean
 ```
 
-**Provider-Specific Folder Structure:**
-Results are now organized by provider:
-- Google Custom Search: `/output/job_boards/google/{requestId}/`
-- SerpAPI (Google): `/output/job_boards/serp/{requestId}/`
-- SerpAPI (Bing): `/output/job_boards/serp/{requestId}/`
+**Unified Folder Structure:**
+All search results are saved in a unified folder regardless of provider:
+- `/output/job_boards/{requestId}/`
 
 Each folder contains:
 - `google-results.csv` - Search results with URLs and metadata
-- `report.json` - Progress tracking with provider information
+- `report.json` - Progress tracking with provider-specific arrays:
+  - `google_report[]` - For Google Custom Search API
+  - `serp_report{}` - For SerpAPI with engine-specific arrays:
+    - `serp_report.google[]` - SerpAPI Google engine pages
+    - `serp_report.bing[]` - SerpAPI Bing engine pages
+    - `serp_report.duckduckgo[]` - SerpAPI DuckDuckGo engine pages
+    - (and other engines as used)
 
 **Stage 1 Features:**
 - **Multi-Provider Support**: Choose between Google Custom Search or SerpAPI
 - **Multi-Engine Support**: SerpAPI supports Google, Bing, Yahoo, DuckDuckGo, Baidu, Yandex
-- **Provider-Specific Organization**: Results organized in `/output/job_boards/{provider}/{requestId}/`
+- **Unified Folder Structure**: All results in `/output/job_boards/{requestId}/` regardless of provider
+- **Engine-Specific Progress Tracking**: Each SerpAPI engine tracks its own pagination progress
 - **Request ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
-- **Checkpoint & Resume**: Automatically resumes from failed pages without re-fetching successful pages
+- **Checkpoint & Resume**: Automatically resumes from failed pages per engine without re-fetching successful pages
 - **Max Retry Limit**: Stops after 3 failed attempts (configurable via `MAX_RETRY_COUNT`)
-- **Clean Flag**: Reset progress with `--clean` while preserving collected URLs
-- **Duplicate Handling**: Automatically skips duplicate URLs across pages
-- **Provider Metadata**: Stores provider and engine information in report.json
+- **Clean Flag**: Reset progress per engine with `--clean` (e.g., `--use=serp --engine=bing --clean` only resets Bing)
+- **Duplicate Handling**: Automatically skips duplicate URLs across pages and engines
 
 #### Stage 2: Job Link Extraction
 
@@ -283,34 +282,52 @@ Stage 1 supports multiple search providers and implements a robust checkpoint sy
 **Flow:**
 1. **Provider Validation**: Checks if selected provider is configured (API keys present)
 2. **Request ID Assignment**: Each run gets a unique ID (auto-generated or custom)
-3. **Folder Creation**: Creates `/output/job_boards/{provider}/{requestId}/`
+3. **Folder Creation**: Creates `/output/job_boards/{requestId}/` (unified structure)
 4. **Provider Initialization**: Creates appropriate provider instance with configuration
 5. **Page-by-Page Fetching**: Fetches up to MAX_PAGES from selected search engine
-6. **Progress Tracking**: Records success/failure of each page in `report.json` with provider info
+6. **Progress Tracking**: Records success/failure per page in `report.json`:
+   - Google Custom Search → `google_report[]` array
+   - SerpAPI → `serp_report.{engine}[]` (e.g., `serp_report.google[]`, `serp_report.bing[]`)
 7. **Data Extraction**: Normalizes results to standard format (URL, snippet, logo, metadata)
-8. **Duplicate Detection**: Skips URLs already found in previous pages
-9. **Error Handling**: Saves error details for failed pages and supports resume
+8. **Duplicate Detection**: Skips URLs already found in previous pages or from other engines
+9. **Error Handling**: Saves error details for failed pages and supports resume per engine
 
-**Provider Metadata in report.json:**
+**Report Structure in report.json:**
 ```json
 {
-  "provider_info": {
-    "name": "serp",
-    "displayName": "SerpAPI (Bing)",
-    "searchEngine": "bing"
-  },
-  "google_report": [...]
+  "google_report": [
+    // Pages from Google Custom Search API
+    {"page": 1, "status": true, "error": null, "retryCount": 0}
+  ],
+  "serp_report": {
+    "google": [
+      // Pages from SerpAPI Google engine
+      {"page": 1, "status": true, "error": null, "retryCount": 0}
+    ],
+    "bing": [
+      // Pages from SerpAPI Bing engine
+      {"page": 1, "status": true, "error": null, "retryCount": 0}
+    ],
+    "duckduckgo": [
+      // Pages from SerpAPI DuckDuckGo engine  
+      {"page": 1, "status": true, "error": null, "retryCount": 0}
+    ]
+    // Other engines added dynamically as used
+  }
 }
 ```
 
 **Checkpoint/Resume Flow:**
-- If a page fails, the next run with the same `--id` automatically resumes from that page
+- Each provider and engine tracks its own progress independently
+- If a page fails, the next run with the same `--id` and provider/engine automatically resumes
 - Retry counter increments on each attempt (max 3 attempts by default)
-- Use `--clean` flag to reset progress and start from page 1
+- Use `--clean` flag to reset progress for the specific provider/engine being used
 
-**Provider-Specific Features:**
-- **Google Custom Search**: Hard limit of 100 results (10 pages), faster response
-- **SerpAPI**: No hard page limit, supports multiple engines, slower but more flexible
+**Multi-Engine Benefits:**
+- Run multiple search engines against the same requestId
+- All results combine in the same CSV file
+- Each engine maintains independent pagination and error tracking
+- Example: `--id=mytest --use=serp --engine=google` then `--id=mytest --use=serp --engine=bing`
 
 ### Stage 2 & 3
 
@@ -536,13 +553,20 @@ cp .env.example .env
 
 # 2. Run Stage 1 to find job listing pages (using default provider)
 npm start -- --stage=1 --id=nov_04_gh
-# Output: output/job_boards/google/nov_04_gh/google-results.csv
-#         output/job_boards/google/nov_04_gh/report.json
+# Output: output/job_boards/nov_04_gh/google-results.csv
+#         output/job_boards/nov_04_gh/report.json
 
 # 2a. Or use SerpAPI with Bing
 npm start -- --stage=1 --id=nov_04_bing --use=serp --engine=bing
-# Output: output/job_boards/serp/nov_04_bing/google-results.csv
-#         output/job_boards/serp/nov_04_bing/report.json
+# Output: output/job_boards/nov_04_bing/google-results.csv
+#         output/job_boards/nov_04_bing/report.json
+
+# 2b. Or combine multiple engines in same requestId
+npm start -- --stage=1 --id=combined --use=google
+npm start -- --stage=1 --id=combined --use=serp --engine=bing
+npm start -- --stage=1 --id=combined --use=serp --engine=duckduckgo
+# Output: output/job_boards/combined/google-results.csv (combined results)
+#         output/job_boards/combined/report.json (tracks each engine separately)
 
 # 3. Run Stage 2 to extract job links
 npm start -- --stage=2 --run=nov_04_gh --id=nov_04_crawl
@@ -558,21 +582,32 @@ npm start -- --stage=3 --run=nov_04_crawl --id=nov_04_extraction
 ### Multi-Provider Examples
 
 ```bash
-# Compare results from different providers
+# Compare results from different providers in separate requestIds
 npm start -- --stage=1 --id=google-run --use=google
 npm start -- --stage=1 --id=serp-google-run --use=serp --engine=google
 npm start -- --stage=1 --id=serp-bing-run --use=serp --engine=bing
 npm start -- --stage=1 --id=serp-yahoo-run --use=serp --engine=yahoo
 
 # Results are organized separately:
-# output/job_boards/google/google-run/
-# output/job_boards/serp/serp-google-run/
-# output/job_boards/serp/serp-bing-run/
-# output/job_boards/serp/serp-yahoo-run/
+# output/job_boards/google-run/
+# output/job_boards/serp-google-run/
+# output/job_boards/serp-bing-run/
+# output/job_boards/serp-yahoo-run/
 
-# Use different engines for different searches
-npm start -- --stage=1 --id=tech-jobs --use=serp --engine=google
-npm start -- --stage=1 --id=marketing-jobs --use=serp --engine=bing
+# OR combine multiple engines in one requestId
+npm start -- --stage=1 --id=combined-search --use=google
+npm start -- --stage=1 --id=combined-search --use=serp --engine=bing
+npm start -- --stage=1 --id=combined-search --use=serp --engine=duckduckgo
+
+# All results saved to: output/job_boards/combined-search/
+# report.json tracks each engine independently:
+# {
+#   "google_report": [...],
+#   "serp_report": {
+#     "bing": [...],
+#     "duckduckgo": [...]
+#   }
+# }
 ```
 
 ### Advanced Stage 1 Usage
@@ -628,11 +663,18 @@ npm start -- --stage=1 --id=my_run
 npm start -- --stage=1 --id=my_run --clean
 ```
 
-**Scenario 3: Google API 100-Result Limit**
+**Scenario 3: Clean Specific Engine**
 ```bash
-npm start -- --stage=1 --id=large_search
-# Output: "Reached Google API result limit (100 results/10 pages). Stopping pagination."
-# This is normal - Google limits Custom Search to 100 results per query
+# You ran multiple engines on same requestId
+npm start -- --stage=1 --id=multi --use=google
+npm start -- --stage=1 --id=multi --use=serp --engine=bing
+npm start -- --stage=1 --id=multi --use=serp --engine=duckduckgo
+
+# Now clean only Bing results and re-run
+npm start -- --stage=1 --id=multi --use=serp --engine=bing --clean
+# Output: "Clean flag detected. Resetting progress for request ID multi"
+#         Only serp_report.bing[] is reset
+#         google_report[] and serp_report.duckduckgo[] remain intact
 ```
 
 ### Advanced Stage 2 Usage
@@ -793,15 +835,12 @@ job-crawler-bot/
 │       ├── content-validator.js      # Content validation
 │       └── index.js                  # Validators index
 ├── output/                           # CSV output files (gitignored)
-│   ├── job_boards/                   # Stage 1 results (organized by provider)
-│   │   ├── google/                   # Google Custom Search results
-│   │   │   └── {requestId}/          # Per request ID folder
-│   │   │       ├── google-results.csv    # Search results with STATUS tracking
-│   │   │       └── report.json           # Progress tracking with provider info
-│   │   └── serp/                     # SerpAPI results
-│   │       └── {requestId}/          # Per request ID folder
-│   │           ├── google-results.csv    # Search results with STATUS tracking
-│   │           └── report.json           # Progress tracking with provider & engine info
+│   ├── job_boards/                   # Stage 1 results (unified structure)
+│   │   └── {requestId}/              # Per request ID folder
+│   │       ├── google-results.csv    # Search results (combined from all providers engines)
+│   │       └── report.json           # Progress tracking:
+│   │                                 #   google_report[] - Google Custom Search pages
+│   │                                 #   serp_report.{engine}[] - SerpAPI engine-specific pages
 │   ├── job_links/                    # Stage 2 results
 │   │   └── {jobId}/                  # Per job ID folder
 │   │       ├── jobs.csv              # Extracted job URLs

@@ -57,47 +57,58 @@ const runStage1 = async (options = {}) => {
         requestId = generateRequestId();
         log.info(`No ID provided. Generated request ID: ${requestId}`);
     } else {
-        if (requestIdExists(config.output.dir, requestId, providerName)) {
+        if (requestIdExists(config.output.dir, requestId)) {
             log.info(`Using existing request ID: ${requestId}`);
         } else {
             log.info(`Starting new Stage 1 run with request ID: ${requestId}`);
         }
     }
 
-    const { requestDir, csvPath, reportPath } = setupJobBoardsFolder(config.output.dir, requestId, providerName);
+    const { requestDir, csvPath, reportPath } = setupJobBoardsFolder(config.output.dir, requestId);
     log.info(`Request folder: ${requestDir}`);
 
     const report = loadReport(reportPath);
 
-    // --clean flag: reset google_report array in {requestId}/report.json
-    if (options.clean) {
-        log.info(`Clean flag detected. Resetting progress for request ID ${requestId}`);
-        report.google_report = [];
-        saveReport(reportPath, report);
+    let reportArray;
+    if (providerName === 'serp') {
+        const engineKey = provider.getSearchEngine().toLowerCase();
+
+        if (!report.serp_report[engineKey]) {
+            report.serp_report[engineKey] = [];
+        }
+
+        reportArray = report.serp_report[engineKey];
+    } else {
+        reportArray = report.google_report;
     }
 
-    if (!report.provider_info) {
-        report.provider_info = {
-            name: provider.getName(),
-            displayName: provider.getDisplayName()
-        };
-        if (provider.getName() === 'serp') {
-            report.provider_info.searchEngine = provider.getSearchEngine();
+    // --clean flag: reset report progress
+    if (options.clean) {
+        log.info(`Clean flag detected. Resetting progress for request ID ${requestId}`);
+
+        if (providerName === 'serp') {
+            const engineKey = provider.getSearchEngine().toLowerCase();
+            report.serp_report[engineKey] = [];
+            reportArray = report.serp_report[engineKey];
+        } else {
+            report.google_report = [];
+            reportArray = report.google_report;
         }
+
         saveReport(reportPath, report);
     }
 
     let startPage = 1;
-    const firstFailedPage = report.google_report.find(p => p.status === false);
+    const firstFailedPage = reportArray.find(p => p.status === false);
 
     if (firstFailedPage) {
         startPage = firstFailedPage.page;
         log.info(`Resuming from page ${startPage} where previous run failed`);
-    } else if (report.google_report.length > 0) {
-        const lastSuccessfulPage = Math.max(...report.google_report.map(p => p.page));
+    } else if (reportArray.length > 0) {
+        const lastSuccessfulPage = Math.max(...reportArray.map(p => p.page));
         if (lastSuccessfulPage >= config.crawler.maxPages) {
             log.info(`All pages already completed successfully for request ID ${requestId}. Use --clean to start fresh.`);
-            return;
+            return requestId;
         }
         startPage = lastSuccessfulPage + 1;
     }
@@ -118,7 +129,7 @@ const runStage1 = async (options = {}) => {
     for (let page = startPage; page <= effectiveMaxPages; page++) {
         log.progress(`Fetching page ${page} of ${effectiveMaxPages}...`);
 
-        let pageReport = report.google_report.find(p => p.page === page);
+        let pageReport = reportArray.find(p => p.page === page);
         const isRetry = pageReport !== undefined;
 
         if (!pageReport) {
@@ -128,7 +139,7 @@ const runStage1 = async (options = {}) => {
                 error: null,
                 retryCount: 0
             };
-            report.google_report.push(pageReport);
+            reportArray.push(pageReport);
         } else if (isRetry) {
             if (pageReport.retryCount >= config.retry.maxRetryCount) {
                 const errorMsg = pageReport.error?.message ||
@@ -141,7 +152,7 @@ const runStage1 = async (options = {}) => {
                 log.error(`Exiting...`);
 
                 saveReport(reportPath, report);
-                return;
+                return requestId;
             }
 
             // Increment retry count
