@@ -89,7 +89,6 @@ const extractWithIntelligentAnalysis = async (page) => {
 
                 if (text.length < 5 || text.length > 200) continue;
 
-                // Skip if matches exclusion patterns
                 if (exclusionPatterns.some(pattern => pattern.test(text))) continue;
 
                 let parent = heading.parentElement;
@@ -103,7 +102,6 @@ const extractWithIntelligentAnalysis = async (page) => {
                 }
                 if (inNav) continue;
 
-                // Calculate prominence score
                 const rect = heading.getBoundingClientRect();
                 const fontSize = parseInt(window.getComputedStyle(heading).fontSize) || 16;
                 const position = rect.top;
@@ -224,30 +222,24 @@ const extractWithIntelligentAnalysis = async (page) => {
             for (const container of allContainers) {
                 const textLength = getTextLength(container);
 
-                // Skip if too short
                 if (textLength < 300) continue;
 
-                // Calculate penalties
                 let penalty = 0;
 
-                // Penalty for job listings
                 if (looksLikeJobListing(container)) {
                     penalty += 10000;
                 }
 
-                // Penalty for boundary markers
                 if (hasBoundaryMarker(container)) {
                     penalty += 5000;
                 }
 
-                // Penalty for excessive links
                 const links = container.querySelectorAll('a');
                 const linkRatio = links.length / Math.max(1, textLength / 100);
                 if (linkRatio > 2) {
                     penalty += 2000;
                 }
 
-                // Check if nested in another container
                 let isNested = false;
                 for (const other of allContainers) {
                     if (other !== container && other.contains(container)) {
@@ -256,7 +248,6 @@ const extractWithIntelligentAnalysis = async (page) => {
                     }
                 }
 
-                // We want long text with low penalties
                 const score = textLength - penalty;
 
                 if (score > 0 && !isNested) {
@@ -264,7 +255,6 @@ const extractWithIntelligentAnalysis = async (page) => {
                 }
             }
 
-            // Remove nested containers - keep only top-level
             const topLevelContainers = [];
             for (const candidate of scoredContainers) {
                 let hasParentInList = false;
@@ -281,7 +271,6 @@ const extractWithIntelligentAnalysis = async (page) => {
                 }
             }
 
-            // Sort by score - highest first
             topLevelContainers.sort((a, b) => b.score - a.score);
 
             const best = topLevelContainers[0];
