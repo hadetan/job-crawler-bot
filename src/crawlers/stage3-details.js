@@ -1,16 +1,11 @@
-const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
 const pLimit = require('p-limit');
 const config = require('../config');
 const log = require('../utils/logger');
-const {
-    generateRequestId,
-    setupJobsFolder,
-    readJobsCsv,
-    loadDetailReport
-} = require('../utils/request-helpers');
+const { generateRequestId, setupJobsFolder, readJobsCsv, loadDetailReport } = require('../utils/request-helpers');
 const processJobURL = require('../utils/process-job-url');
+const pupBrowser = require('../utils/browser');
 
 const runStage3 = async (options = {}) => {
     log.info('Starting Stage 3: Job Details Extractor...');
@@ -108,19 +103,7 @@ const runStage3 = async (options = {}) => {
 
     const detailReport = loadDetailReport(reportPath);
 
-    const browser = await puppeteer.launch({
-        headless: config.crawler.headless,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-http2',
-            '--disable-blink-features=AutomationControlled',
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process'
-        ],
-        ignoreHTTPSErrors: true
-    });
+    const browser = await pupBrowser();
 
     const stats = {
         successCount: 0,

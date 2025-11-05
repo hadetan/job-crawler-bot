@@ -1,33 +1,24 @@
-const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
 const pLimit = require('p-limit');
 const config = require('../config');
 const log = require('../utils/logger');
 const { extractJobLinks } = require('../utils/job-links');
-const {
-    generateRequestId,
-    setupJobLinksFolder,
-    loadReport,
-    saveReport,
-    readGoogleResultsCsv,
-    writeGoogleResultsCsv,
-    getExistingJobUrls,
-    appendToJobsCsv
-} = require('../utils/request-helpers');
+const { generateRequestId, setupJobLinksFolder, loadReport, saveReport, readGoogleResultsCsv, writeGoogleResultsCsv, getExistingJobUrls, appendToJobsCsv } = require('../utils/request-helpers');
+const pupBrowser = require('../utils/browser');
 
 const runStage2 = async (options = {}) => {
     log.info('Starting Stage 2: Job Link Extractor...');
 
     // Validate --run parameter
-    if (!options.jobId) {
-        log.error('Stage 2 requires --run parameter. Usage: npm start -- --stage=2 --run={jobId} [--id={jobId}] [--clean]');
+    if (!options.runId) {
+        log.error('Stage 2 requires --run parameter. Usage: npm start -- --stage=2 --run={runId} [--id={runId}] [--clean]');
         process.exit(1);
     }
 
-    const requestDir = path.join(config.output.dir, 'job_boards', options.jobId);
+    const requestDir = path.join(config.output.dir, 'job_boards', options.runId);
     if (!fs.existsSync(requestDir)) {
-        log.error(`Stage 1 run '${options.jobId}' not found at ${requestDir}\nPlease run Stage 1 first with this jobId or use an existing one.`);
+        log.error(`Stage 1 run '${options.runId}' not found at ${requestDir}\nPlease run Stage 1 first with this jobId or use an existing one.`);
         process.exit(1);
     }
 
@@ -105,19 +96,7 @@ const runStage2 = async (options = {}) => {
         return;
     }
 
-    const browser = await puppeteer.launch({
-        headless: config.crawler.headless,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-http2',
-            '--disable-blink-features=AutomationControlled',  /* Hide automation */
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process'
-        ],
-        ignoreHTTPSErrors: true
-    });
+    const browser = await pupBrowser();
 
     const limit = pLimit(config.crawler.concurrency);
     let totalJobLinksExtracted = 0;
@@ -135,6 +114,7 @@ const runStage2 = async (options = {}) => {
         try {
             await page.setUserAgent(config.crawler.userAgent);
             await page.setViewport({ width: 1920, height: 1080 });
+            await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
 
             const jobLinks = await extractJobLinks(page, url);
             totalJobLinksExtracted += jobLinks.length;
