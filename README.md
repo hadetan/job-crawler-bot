@@ -8,7 +8,8 @@ A 3-stage job crawler system that discovers job listing pages via multiple searc
   - **SerpAPI** - Multi-engine support (Google, Bing, Yahoo, DuckDuckGo, etc.)
   - Unified folder structure with engine-specific progress tracking
 - **Stage 2**: Provider-aware job link harvesting that drives Greenhouse and Lever boards via a shared registry
-- **Stage 3**: Job detail extraction with provider-specific APIs (Lever) and DOM fallbacks (Greenhouse and others)
+- **Stage 3**: Job detail extraction with provider-specific APIs (Lever) and DOM fallbacks (Greenhouse and others), now instrumented with strategy telemetry and listing recovery safeguards
+- Consistent job description formatting that mirrors Greenhouse output across providers
 - Full control via environment variables (concurrency, headless mode, timeouts, selectors)
 - Automatic deduplication across multiple runs
 - Retry logic with exponential backoff
@@ -224,13 +225,17 @@ npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction --force
 - **Run ID Required**: Must specify `--run={jobId}` to indicate which Stage 2 output to read
 - **Dedicated Folders**: Results saved in `/output/jobs/{extractionId}/` with company-based organization
 - **Provider-Aware Details**: Uses provider modules to fetch structured data (e.g., Lever API) before falling back to generic DOM/structured extraction
+- **Provider Hooks**: Supports `prepareJobDetail`/`postProcessJobDetail` so providers can enrich context (slug, filters, metadata) and refine output without custom orchestration code
+- **Greenhouse-Style Formatting**: Normalizes HTML descriptions via html-to-text and cleaner utilities to keep whitespace, paragraphs, and lists consistent across providers
 - **Retry Logic**: Automatically retries failed extractions up to 3 times (configurable via `MAX_RETRY_COUNT`)
 - **Resume Capability**: Skips completed jobs and continues from pending/failed URLs
 - **Force Mode**: Use `--force` to retry only failed URLs, ignoring retry count limits
-- **CSV Status Updates**: Updates Stage 2's jobs.csv with extraction status and file paths
+- **CSV Status Updates**: Updates Stage 2's jobs.csv with extraction status, resolved file paths, and a `DETAIL_STRATEGY` column for post-run analysis
 - **Company Organization**: Jobs saved as `{companyName}/{number}.txt` for easy browsing
-- **Detail Reports**: Tracks passed/failed URLs per company in report.json
-- **Comprehensive Logging**: Shows extraction methods, success rates, and company-wise job counts
+- **Detail Reports**: Tracks passed/failed URLs per company in report.json along with provider diagnostics and chosen strategy
+- **Strategy Telemetry**: CLI summary surfaces per-strategy counts (e.g., `lever-api`, `lever-dom`, `generic`) so you can confirm API coverage at a glance
+- **Listing Recovery**: When a "job" URL is really a listing hub, Stage 3 can follow fresh detail pages (depth 1) instead of failing outright
+- **Comprehensive Logging**: Shows extraction methods, success rates, strategy totals, and company-wise job counts
 
 ## CLI Options Reference
 
