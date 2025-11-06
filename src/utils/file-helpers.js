@@ -19,6 +19,21 @@ const extractCompanyName = (url) => {
             }
         }
 
+        if (hostname.endsWith('lever.co')) {
+            const pathParts = urlObj.pathname.split('/').filter(Boolean);
+
+            if (hostname === 'jobs.lever.co' || hostname === 'apply.lever.co') {
+                if (pathParts.length > 0) {
+                    return pathParts[0];
+                }
+            }
+
+            const hostParts = hostname.split('.');
+            if (hostParts.length >= 3) {
+                return hostParts[0];
+            }
+        }
+
         const domainParts = hostname.split('.');
         if (domainParts.length >= 2) {
             return domainParts[domainParts.length - 2];
