@@ -112,6 +112,9 @@ const runStage2 = async (options = {}) => {
         const providerId = provider ? provider.id : DEFAULT_PROVIDER_ID;
 
         log.progress(`Processing job board ${index + 1} of ${urlsNeedingProcessing.length}: ${url} (provider: ${providerId})`);
+        if (!provider) {
+            log.info(`No provider registered for ${url}. Using generic link extractor.`);
+        }
 
         const page = await browser.newPage();
         const providerCollects = provider && typeof provider.collectJobLinks === 'function';
@@ -167,7 +170,7 @@ const runStage2 = async (options = {}) => {
             let providerDiagnostics = null;
             let extractedEntries = [];
 
-            if (provider && typeof provider.collectJobLinks === 'function') {
+            if (providerCollects) {
                 try {
                     const providerResult = await provider.collectJobLinks({
                         page,
@@ -183,6 +186,7 @@ const runStage2 = async (options = {}) => {
                             .filter(Boolean);
                         collectionStrategy = providerResult.strategy || 'provider';
                         providerDiagnostics = providerResult.diagnostics || null;
+                        log.info(`Provider ${provider.id} returned ${extractedEntries.length} job link(s) via ${collectionStrategy}.`);
                     }
                 } catch (providerError) {
                     log.warn(`Provider ${provider.id} collectJobLinks failed for ${url}: ${providerError.message}`);
@@ -190,11 +194,17 @@ const runStage2 = async (options = {}) => {
             }
 
             if (!Array.isArray(extractedEntries) || extractedEntries.length === 0) {
+                if (providerCollects) {
+                    log.info(`Provider ${providerId} returned no links. Falling back to generic extractor for ${url}.`);
+                }
                 const fallbackLinks = await extractJobLinks(page, url);
                 extractedEntries = fallbackLinks
                     .map(normalizeJobLinkEntry)
                     .filter(Boolean);
                 collectionStrategy = 'generic';
+                if (extractedEntries.length > 0) {
+                    log.info(`Generic extractor recovered ${extractedEntries.length} job link(s) for ${url}.`);
+                }
             }
 
             totalJobLinksExtracted += extractedEntries.length;

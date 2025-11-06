@@ -90,6 +90,9 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             }
 
             if (!jobData) {
+                if (provider && typeof provider.fetchJobDetail === 'function') {
+                    log.info(`Provider ${resolvedProviderId} did not return job details for ${url}. Falling back to generic extractor.`);
+                }
                 jobData = await extractJobDetails(page, url);
             }
             const companyDir = path.join(jobsDir, companyName);
