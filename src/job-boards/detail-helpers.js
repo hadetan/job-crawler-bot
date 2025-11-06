@@ -1,5 +1,7 @@
 const axios = require('axios');
+const { convert } = require('html-to-text');
 const config = require('../config');
+const cleanDescription = require('../utils/description-cleaner');
 
 const DEFAULT_JSON_HEADERS = {
     Accept: 'application/json',
@@ -40,14 +42,59 @@ const stripHtml = (value) => {
         .replace(/&nbsp;/gi, ' ');
 };
 
-const resolveDescription = ({ plainText = '', html = '' }) => {
-    const normalizedPlain = normalizeWhitespace(plainText);
-    if (normalizedPlain && normalizedPlain.length >= 50) {
-        return normalizedPlain;
+const HTML_TO_TEXT_OPTIONS = {
+    wordwrap: 130,
+    preserveNewlines: true,
+    selectors: [
+        { selector: 'a', options: { ignoreHref: true } },
+        { selector: 'img', format: 'skip' }
+    ]
+};
+
+const normalizeLineBreaks = (value) => {
+    if (!value) {
+        return '';
     }
 
-    const fromHtml = stripHtml(html);
-    return normalizeWhitespace(fromHtml || normalizedPlain);
+    const normalized = value
+        .replace(/\r\n?/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    return normalized.replace(/[ \t]{3,}/g, ' ');
+};
+
+const resolveDescription = ({ plainText = '', html = '' }) => {
+    const normalizedHtml = typeof html === 'string' ? html.trim() : '';
+    if (normalizedHtml) {
+        try {
+            const converted = convert(normalizedHtml, HTML_TO_TEXT_OPTIONS).trim();
+            const cleaned = cleanDescription(normalizeLineBreaks(converted));
+            if (cleaned && cleaned.length >= 50) {
+                return cleaned;
+            }
+        } catch (_) {
+            // Ignore conversion failures and fall back to alternate representations.
+        }
+    }
+
+    const normalizedPlain = typeof plainText === 'string'
+        ? plainText.replace(/\r\n?/g, '\n')
+        : '';
+
+    if (normalizedPlain) {
+        const cleanedPlain = cleanDescription(normalizeLineBreaks(normalizedPlain));
+        if (cleanedPlain && cleanedPlain.length >= 50) {
+            return cleanedPlain;
+        }
+    }
+
+    const stripped = stripHtml(normalizedHtml);
+    const fallback = normalizeLineBreaks(stripped || normalizedPlain);
+    return fallback || '';
 };
 
 const collectListText = (lists = []) => {
