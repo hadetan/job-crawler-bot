@@ -80,11 +80,13 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
                     pageForProvider = providerUsesBrowser ? await pageController.ensurePage() : null;
                     const providerResult = await provider.fetchJobDetail({
                         page: pageForProvider,
+                        ensurePage: pageController.ensurePage,
                         url,
                         providerId: resolvedProviderId,
                         attempt,
                         logger: log,
-                        context: providerContext || undefined
+                        context: providerContext || undefined,
+                        jobRecord
                     });
 
                     if (providerResult) {
