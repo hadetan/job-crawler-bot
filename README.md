@@ -397,7 +397,7 @@ All stages support:
 
 #### No Search Providers Configured
 
-**Message**: `❌ No search providers are configured!`
+**Message**: `No search providers are configured!`
 
 **Solution**:
 - Add at least one API key to your `.env` file:
@@ -406,7 +406,7 @@ All stages support:
 
 #### Unknown or Unavailable Provider
 
-**Message**: `❌ Search provider 'xyz' is not configured or unavailable.`
+**Message**: `Search provider 'xyz' is not configured or unavailable.`
 
 **Solution**:
 - Check available providers in the error message
@@ -416,7 +416,7 @@ All stages support:
 
 #### Invalid --engine Parameter
 
-**Warning**: `⚠️  Warning: --engine parameter is only supported with --use=serp. Ignoring.`
+**Warning**: `Warning: --engine parameter is only supported with --use=serp. Ignoring.`
 
 **Solution**:
 - The `--engine` parameter only works with SerpAPI provider
@@ -433,7 +433,7 @@ All stages support:
 
 #### Max Retry Limit Reached
 
-**Message**: `⚠️  Max retry limit (3) reached for page {X}`
+**Message**: `Max retry limit (3) reached for page {X}`
 
 **Solution**:
 - Check the error in `output/job_boards/{requestId}/report.json` for details
@@ -703,7 +703,7 @@ npm start -- --stage=1 --id=my_run
 ```bash
 # After 3 failed attempts on page 5
 npm start -- --stage=1 --id=my_run
-# Output: "⚠️  Max retry limit (3) reached for page 5"
+# Output: "Max retry limit (3) reached for page 5"
 #         "Error: Network timeout"
 #         "This page will be skipped. Review full error in report.json"
 #         "Exiting..."
@@ -786,7 +786,7 @@ npm start -- --stage=3 --run=nov_03_crawl --id=second_run
 # Run Stage 2, some URLs fail during extraction
 npm start -- --stage=2 --run=nov_03_gh --id=my_crawl
 # Output: "Failed to extract from https://example.com/jobs: Navigation timeout"
-#         "✅ Stage 2 complete for jobId: my_crawl"
+#         "Stage 2 complete for jobId: my_crawl"
 #         "Failed extractions: 2"
 #         search-results.csv shows failed URLs with STATUS='failed'
 
@@ -810,7 +810,7 @@ npm start -- --stage=2 --run=nov_03_gh --id=my_crawl --clean
 # Run Stage 3, some URLs fail during extraction
 npm start -- --stage=3 --run=nov_03_crawl --id=my_extraction
 # Output: "Validation failed for https://example.com/job/123: No structured data found"
-#         "✅ Stage 3 complete: 45 jobs saved"
+#         "Stage 3 complete: 45 jobs saved"
 #         "Summary - Total processed: 50, Successful: 45, Failed: 5"
 #         jobs.csv shows failed URLs with STATUS='failed' and RETRY=1
 

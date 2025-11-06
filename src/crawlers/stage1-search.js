@@ -154,7 +154,7 @@ const runStage1 = async (options = {}) => {
     const effectiveMaxPages = Math.min(maxPagesConfigured, providerMaxPages);
 
     if (maxPagesConfigured > providerMaxPages) {
-        log.warn(`⚠️  Provider ${provider.getName()} has a maximum of ${providerMaxPages} pages. Limiting to ${effectiveMaxPages} pages.`);
+        log.warn(`Provider ${provider.getName()} has a maximum of ${providerMaxPages} pages. Limiting to ${effectiveMaxPages} pages.`);
     }
 
     for (let page = startPage; page <= effectiveMaxPages; page++) {
