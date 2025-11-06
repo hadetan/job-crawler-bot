@@ -12,6 +12,7 @@ const {
 const { extractJobLinks } = require('../utils/job-links');
 const extractJobDetails = require('../utils/extract-job-details');
 const { updateJobStatus, saveDetailReport } = require('./request-helpers');
+const { findProviderByUrl, getProviderById, DEFAULT_PROVIDER_ID } = require('../job-boards');
 
 /**
  * Process a single job URL with retry logic
@@ -30,15 +31,21 @@ const { updateJobStatus, saveDetailReport } = require('./request-helpers');
  * @returns {Promise<void>}
  */
 const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = {}) => {
-    log.progress(`Processing job ${index + 1}/${total}: ${url}`);
-
     const {
         jobsCsvPath,
         detailReport,
         reportPath,
         currentRetryCount = 0,
-        depth = 0
+        depth = 0,
+        providerId: providerIdHint = DEFAULT_PROVIDER_ID
     } = opts;
+
+    const providerFromRecord = providerIdHint ? getProviderById(providerIdHint) : null;
+    const providerFromUrl = findProviderByUrl(url);
+    const provider = providerFromRecord || providerFromUrl || null;
+    const resolvedProviderId = provider ? provider.id : (providerIdHint || DEFAULT_PROVIDER_ID);
+
+    log.progress(`Processing job ${index + 1}/${total}: ${url} (provider: ${resolvedProviderId})`);
 
     const maxRetries = process.env.MAX_RETRIES || 3;
     let lastError = null;
@@ -77,7 +84,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             if (jobData.source === 'intelligent-analysis') stats.intelligentCount++;
 
             log.info(`Extracted via ${jobData.source}`);
-            log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
+            log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}" [provider: ${resolvedProviderId}]`);
 
             if (jobsCsvPath) {
                 const fileNamePath = `${companyName}/${fileName}`;
@@ -93,7 +100,8 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
                 }
 
                 detailReport.detail_extraction_report[companyName].passedUrls.push({
-                    url: url
+                    url,
+                    provider: resolvedProviderId
                 });
 
                 saveDetailReport(reportPath, detailReport);
@@ -185,9 +193,13 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
                             log.info(`Detected listing page. Following ${newLinksCount} new job links (depth 1).`);
                             const before = stats.successCount;
                             for (const link of toFollow) {
+                                const nestedProvider = findProviderByUrl(link);
+                                const nestedProviderId = nestedProvider ? nestedProvider.id : resolvedProviderId;
                                 await processJobURL(browser, link, 0, toFollow.length, jobsDir, stats, {
                                     ...opts,
-                                    depth: depth + 1
+                                    depth: depth + 1,
+                                    currentRetryCount: 0,
+                                    providerId: nestedProviderId
                                 });
                             }
                             listingSuccesses = stats.successCount - before;
@@ -240,7 +252,8 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             }
 
             detailReport.detail_extraction_report[companyName].failedUrls.push({
-                url: url,
+                url,
+                provider: resolvedProviderId,
                 reason: reason
             });
 

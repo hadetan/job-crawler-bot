@@ -1,5 +1,60 @@
 const fs = require('fs');
 const path = require('path');
+const { DEFAULT_PROVIDER_ID } = require('../job-boards');
+
+const escapeCsvField = (field) => {
+    if (field === null || field === undefined) return '';
+    const str = String(field);
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+};
+
+const formatCsvLine = (fields) => fields.map(escapeCsvField).join(',');
+
+const JOBS_CSV_HEADER = ['URL', 'PROVIDER', 'STATUS', 'REMARKS', 'FILENAME', 'RETRY'];
+const JOBS_CSV_HEADER_LINE = JOBS_CSV_HEADER.join(',');
+
+const ensureJobsCsvHasProviderColumn = (csvPath) => {
+    if (!fs.existsSync(csvPath)) {
+        return false;
+    }
+
+    const content = fs.readFileSync(csvPath, 'utf-8');
+    const lines = content.split('\n');
+    if (lines.length === 0) {
+        return false;
+    }
+
+    const headerFields = parseCSVLine(lines[0]).map(field => field.trim().toUpperCase());
+    if (headerFields.includes('PROVIDER')) {
+        return false; // Already upgraded
+    }
+
+    const upgradedLines = [];
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line) {
+            continue;
+        }
+        const fields = parseCSVLine(line);
+        const upgraded = [
+            fields[0] || '',
+            '',
+            fields[1] || '',
+            fields[2] || '',
+            fields[3] || '',
+            fields[4] || ''
+        ];
+        upgradedLines.push(formatCsvLine(upgraded));
+    }
+
+    const nextLines = upgradedLines.join('\n');
+    const finalContent = nextLines ? `${JOBS_CSV_HEADER_LINE}\n${nextLines}\n` : `${JOBS_CSV_HEADER_LINE}\n`;
+    fs.writeFileSync(csvPath, finalContent, 'utf-8');
+    return true;
+};
 
 /**
  * Generate a random 6-digit numeric ID
@@ -137,23 +192,14 @@ const requestIdExists = (outputDir, requestId) => {
  * @param {Array} rows - Array of row objects with URL, STATUS, JOB_COUNT, SNIPPET, LOGO_URL, REMARKS
 */
 const appendToGoogleResultsCsv = (csvPath, rows) => {
-    const escapeCsvField = (field) => {
-        if (field === null || field === undefined) return '';
-        const str = String(field);
-        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) return `"${str.replace(/"/g, '""')}"`;
-
-        return str;
-    };
-    const csvLines = rows.map(row => {
-        return [
-            escapeCsvField(row.URL),
-            escapeCsvField(row.STATUS),
-            escapeCsvField(row.JOB_COUNT),
-            escapeCsvField(row.SNIPPET),
-            escapeCsvField(row.LOGO_URL),
-            escapeCsvField(row.REMARKS)
-        ].join(',');
-    });
+    const csvLines = rows.map(row => formatCsvLine([
+        row.URL,
+        row.STATUS,
+        row.JOB_COUNT,
+        row.SNIPPET,
+        row.LOGO_URL,
+        row.REMARKS
+    ]));
 
     fs.appendFileSync(csvPath, csvLines.join('\n') + '\n', 'utf-8');
 };
@@ -215,8 +261,9 @@ const setupJobLinksFolder = (outputDir, jobId) => {
     }
 
     if (!fs.existsSync(jobsCsvPath)) {
-        const csvHeaders = 'URL,STATUS,REMARKS,FILENAME,RETRY\n';
-        fs.writeFileSync(jobsCsvPath, csvHeaders, 'utf-8');
+        fs.writeFileSync(jobsCsvPath, `${JOBS_CSV_HEADER_LINE}\n`, 'utf-8');
+    } else {
+        ensureJobsCsvHasProviderColumn(jobsCsvPath);
     }
 
     return {
@@ -242,14 +289,15 @@ const jobIdExists = (outputDir, jobId) => {
  * @param {string} line - CSV line to parse
  * @returns {Array<string>} Array of field values
  */
-const parseCSVLine = (line) => {
+function parseCSVLine(line) {
+    const sanitizedLine = line.endsWith('\r') ? line.slice(0, -1) : line;
     const fields = [];
     let currentField = '';
     let inQuotes = false;
 
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        const nextChar = line[i + 1];
+    for (let i = 0; i < sanitizedLine.length; i++) {
+        const char = sanitizedLine[i];
+        const nextChar = sanitizedLine[i + 1];
 
         if (char === '"') {
             if (inQuotes && nextChar === '"') {
@@ -269,7 +317,7 @@ const parseCSVLine = (line) => {
     fields.push(currentField);
 
     return fields;
-};
+}
 
 /**
  * Read search-results.csv and return array of row objects
@@ -317,28 +365,18 @@ const readGoogleResultsCsv = (csvPath) => {
  * @param {Array<Object>} rows - Array of row objects with URL, STATUS, JOB_COUNT, SNIPPET, LOGO_URL, REMARKS
  */
 const writeGoogleResultsCsv = (csvPath, rows) => {
-    const escapeCsvField = (field) => {
-        if (field === null || field === undefined) return '';
-        const str = String(field);
-        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-            return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-    };
-
     const header = 'URL,STATUS,JOB_COUNT,SNIPPET,LOGO_URL,REMARKS\n';
-    const csvLines = rows.map(row => {
-        return [
-            escapeCsvField(row.URL),
-            escapeCsvField(row.STATUS),
-            escapeCsvField(row.JOB_COUNT),
-            escapeCsvField(row.SNIPPET),
-            escapeCsvField(row.LOGO_URL),
-            escapeCsvField(row.REMARKS)
-        ].join(',');
-    });
+    const csvLines = rows.map(row => formatCsvLine([
+        row.URL,
+        row.STATUS,
+        row.JOB_COUNT,
+        row.SNIPPET,
+        row.LOGO_URL,
+        row.REMARKS
+    ]));
 
-    fs.writeFileSync(csvPath, header + csvLines.join('\n') + '\n', 'utf-8');
+    const body = csvLines.length ? `${csvLines.join('\n')}\n` : '';
+    fs.writeFileSync(csvPath, header + body, 'utf-8');
 };
 
 /**
@@ -350,6 +388,8 @@ const getExistingJobUrls = (csvPath) => {
     if (!fs.existsSync(csvPath)) {
         return new Set();
     }
+
+    ensureJobsCsvHasProviderColumn(csvPath);
 
     const content = fs.readFileSync(csvPath, 'utf-8');
     const lines = content.split('\n').slice(1);
@@ -370,47 +410,73 @@ const getExistingJobUrls = (csvPath) => {
 /**
  * Append job links to jobs.csv
  * @param {string} csvPath - Path to jobs.csv
- * @param {Array<string>} jobUrls - Array of job URLs to append
+ * @param {Array<string|{url: string, providerId?: string}>} jobEntries - Links or objects to append
+ * @param {string} [defaultProviderId]
  */
-const appendToJobsCsv = (csvPath, jobUrls) => {
-    const escapeCsvField = (field) => {
-        if (field === null || field === undefined) return '';
-        const str = String(field);
-        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-            return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-    };
+const appendToJobsCsv = (csvPath, jobEntries, defaultProviderId = DEFAULT_PROVIDER_ID) => {
+    if (!fs.existsSync(csvPath)) {
+        fs.writeFileSync(csvPath, `${JOBS_CSV_HEADER_LINE}\n`, 'utf-8');
+    }
 
-    const csvLines = jobUrls.map(url => {
-        return [
-            escapeCsvField(url),
-            'pending',
-            '',
-            '',
-            '0'
-        ].join(',');
-    });
+    ensureJobsCsvHasProviderColumn(csvPath);
 
-    fs.appendFileSync(csvPath, csvLines.join('\n') + '\n', 'utf-8');
+    const entriesArray = Array.isArray(jobEntries) ? jobEntries : [jobEntries];
+    const csvLines = entriesArray
+        .map((entry) => {
+            if (!entry && entry !== 0) return null;
+
+            let url = entry;
+            let providerId = defaultProviderId;
+
+            if (typeof entry === 'object') {
+                url = entry.url || entry.URL || entry.href || '';
+                providerId = entry.providerId || entry.provider || entry.PROVIDER || defaultProviderId;
+            }
+
+            if (!url) {
+                return null;
+            }
+
+            return formatCsvLine([
+                url,
+                providerId || defaultProviderId,
+                'pending',
+                '',
+                '',
+                '0'
+            ]);
+        })
+        .filter(Boolean);
+
+    if (csvLines.length > 0) {
+        fs.appendFileSync(csvPath, csvLines.join('\n') + '\n', 'utf-8');
+    }
 };
 
 /**
  * Read jobs.csv and return array of job objects
  * @param {string} csvPath - Path to jobs.csv
- * @returns {Array<Object>} Array of job objects with URL, STATUS, REMARKS, FILENAME, RETRY
+ * @returns {Array<Object>} Array of job objects with URL, PROVIDER, STATUS, REMARKS, FILENAME, RETRY
  */
 const readJobsCsv = (csvPath) => {
     if (!fs.existsSync(csvPath)) {
         return [];
     }
 
+    ensureJobsCsvHasProviderColumn(csvPath);
+
     const content = fs.readFileSync(csvPath, 'utf-8');
     const lines = content.split('\n');
 
-    if (lines.length < 2) {
+    if (lines.length < 1) {
         return [];
     }
+
+    const headerFields = parseCSVLine(lines[0]);
+    const headerMap = headerFields.reduce((acc, field, index) => {
+        acc[field.trim().toUpperCase()] = index;
+        return acc;
+    }, {});
 
     const jobs = [];
 
@@ -420,14 +486,17 @@ const readJobsCsv = (csvPath) => {
 
         const fields = parseCSVLine(line);
 
-        if (fields.length >= 5) {
-            jobs.push({
-                URL: fields[0],
-                STATUS: fields[1],
-                REMARKS: fields[2],
-                FILENAME: fields[3],
-                RETRY: fields[4]
-            });
+        const job = {
+            URL: fields[headerMap.URL] || '',
+            PROVIDER: fields[headerMap.PROVIDER] || DEFAULT_PROVIDER_ID,
+            STATUS: fields[headerMap.STATUS] || '',
+            REMARKS: fields[headerMap.REMARKS] || '',
+            FILENAME: fields[headerMap.FILENAME] || '',
+            RETRY: fields[headerMap.RETRY] || ''
+        };
+
+        if (job.URL) {
+            jobs.push(job);
         }
     }
 
@@ -437,30 +506,20 @@ const readJobsCsv = (csvPath) => {
 /**
  * Write entire jobs.csv file (replaces existing)
  * @param {string} csvPath - Path to jobs.csv
- * @param {Array<Object>} jobs - Array of job objects with URL, STATUS, REMARKS, FILENAME, RETRY
+ * @param {Array<Object>} jobs - Array of job objects with URL, PROVIDER, STATUS, REMARKS, FILENAME, RETRY
  */
 const writeJobsCsv = (csvPath, jobs) => {
-    const escapeCsvField = (field) => {
-        if (field === null || field === undefined) return '';
-        const str = String(field);
-        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-            return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-    };
+    const csvLines = jobs.map(job => formatCsvLine([
+        job.URL,
+        job.PROVIDER || DEFAULT_PROVIDER_ID,
+        job.STATUS,
+        job.REMARKS,
+        job.FILENAME,
+        job.RETRY
+    ]));
 
-    const header = 'URL,STATUS,REMARKS,FILENAME,RETRY\n';
-    const csvLines = jobs.map(job => {
-        return [
-            escapeCsvField(job.URL),
-            escapeCsvField(job.STATUS),
-            escapeCsvField(job.REMARKS),
-            escapeCsvField(job.FILENAME),
-            escapeCsvField(job.RETRY)
-        ].join(',');
-    });
-
-    fs.writeFileSync(csvPath, header + csvLines.join('\n') + '\n', 'utf-8');
+    const body = csvLines.length ? `${csvLines.join('\n')}\n` : '';
+    fs.writeFileSync(csvPath, `${JOBS_CSV_HEADER_LINE}\n${body}`, 'utf-8');
 };
 
 /**

@@ -4,6 +4,7 @@ const pLimit = require('p-limit');
 const config = require('../config');
 const log = require('../utils/logger');
 const { generateRequestId, setupJobsFolder, readJobsCsv, loadDetailReport } = require('../utils/request-helpers');
+const { DEFAULT_PROVIDER_ID } = require('../job-boards');
 const processJobURL = require('../utils/process-job-url');
 const pupBrowser = require('../utils/browser');
 
@@ -127,7 +128,8 @@ const runStage3 = async (options = {}) => {
                     jobsCsvPath,
                     detailReport,
                     reportPath,
-                    currentRetryCount: parseInt(job.RETRY, 10) || 0
+                    currentRetryCount: parseInt(job.RETRY, 10) || 0,
+                    providerId: job.PROVIDER || DEFAULT_PROVIDER_ID
                 }
             ))
         )

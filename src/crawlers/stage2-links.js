@@ -4,6 +4,7 @@ const pLimit = require('p-limit');
 const config = require('../config');
 const log = require('../utils/logger');
 const { extractJobLinks } = require('../utils/job-links');
+const { findProviderByUrl, DEFAULT_PROVIDER_ID } = require('../job-boards');
 const { generateRequestId, setupJobLinksFolder, loadLinkReport, saveLinkReport, readGoogleResultsCsv, writeGoogleResultsCsv, getExistingJobUrls, appendToJobsCsv } = require('../utils/request-helpers');
 const pupBrowser = require('../utils/browser');
 
@@ -107,45 +108,114 @@ const runStage2 = async (options = {}) => {
 
     const processJobBoardURL = async (rowData, index) => {
         const url = rowData.URL;
-        log.progress(`Processing job board ${index + 1} of ${urlsNeedingProcessing.length}: ${url}`);
+        const provider = findProviderByUrl(url);
+        const providerId = provider ? provider.id : DEFAULT_PROVIDER_ID;
+
+        log.progress(`Processing job board ${index + 1} of ${urlsNeedingProcessing.length}: ${url} (provider: ${providerId})`);
 
         const page = await browser.newPage();
+        const providerCollects = provider && typeof provider.collectJobLinks === 'function';
 
         try {
             await page.setUserAgent(config.crawler.userAgent);
             await page.setViewport({ width: 1920, height: 1080 });
             await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
 
-            const jobLinks = await extractJobLinks(page, url);
-            totalJobLinksExtracted += jobLinks.length;
+            const normalizeJobLinkEntry = (value) => {
+                if (!value && value !== 0) {
+                    return null;
+                }
+
+                if (typeof value === 'string') {
+                    return { url: value, providerId };
+                }
+
+                if (typeof value === 'object') {
+                    const entryUrl = value.url || value.URL || value.href || '';
+                    if (!entryUrl) {
+                        return null;
+                    }
+
+                    return {
+                        url: entryUrl,
+                        providerId: value.providerId || value.provider || value.PROVIDER || providerId
+                    };
+                }
+
+                return null;
+            };
+
+            let collectionStrategy = 'generic';
+            let providerDiagnostics = null;
+            let extractedEntries = [];
+
+            if (provider && typeof provider.collectJobLinks === 'function') {
+                try {
+                    const providerResult = await provider.collectJobLinks({
+                        page,
+                        url,
+                        logger: log,
+                        requestRow: rowData
+                    });
+
+                    const candidateList = providerResult && (providerResult.jobUrls || providerResult.jobLinks || providerResult.jobs);
+                    if (Array.isArray(candidateList)) {
+                        extractedEntries = candidateList
+                            .map(normalizeJobLinkEntry)
+                            .filter(Boolean);
+                        collectionStrategy = providerResult.strategy || 'provider';
+                        providerDiagnostics = providerResult.diagnostics || null;
+                    }
+                } catch (providerError) {
+                    log.warn(`Provider ${provider.id} collectJobLinks failed for ${url}: ${providerError.message}`);
+                }
+            }
+
+            if (!Array.isArray(extractedEntries) || extractedEntries.length === 0) {
+                const fallbackLinks = await extractJobLinks(page, url);
+                extractedEntries = fallbackLinks
+                    .map(normalizeJobLinkEntry)
+                    .filter(Boolean);
+                collectionStrategy = 'generic';
+            }
+
+            totalJobLinksExtracted += extractedEntries.length;
 
             const newLinks = [];
-            jobLinks.forEach(jobUrl => {
+            extractedEntries.forEach(entry => {
+                const jobUrl = entry.url;
                 if (existingJobUrls.has(jobUrl)) {
                     duplicatesSkipped++;
                 } else {
                     existingJobUrls.add(jobUrl);
-                    newLinks.push(jobUrl);
+                    newLinks.push(entry);
                 }
             });
 
             if (newLinks.length > 0) {
-                appendToJobsCsv(jobsCsvPath, newLinks);
+                appendToJobsCsv(jobsCsvPath, newLinks, providerId);
                 newJobLinksAdded += newLinks.length;
             }
 
             report.link_extraction_report[url] = {
                 status: true,
-                jobLinksFound: jobLinks.length,
+                provider: providerId,
+                strategy: collectionStrategy,
+                jobLinksFound: extractedEntries.length,
+                newJobLinksAdded: newLinks.length,
+                duplicatesSkipped: extractedEntries.length - newLinks.length,
                 error: null
             };
+            if (providerDiagnostics) {
+                report.link_extraction_report[url].diagnostics = providerDiagnostics;
+            }
             saveLinkReport(reportPath, report);
 
             const googleRows = readGoogleResultsCsv(googleResultsCsv);
             const rowToUpdate = googleRows.find(r => r.URL === url);
             if (rowToUpdate) {
                 rowToUpdate.STATUS = 'completed';
-                rowToUpdate.JOB_COUNT = String(jobLinks.length);
+                rowToUpdate.JOB_COUNT = String(extractedEntries.length);
                 writeGoogleResultsCsv(googleResultsCsv, googleRows);
             }
 
@@ -156,6 +226,8 @@ const runStage2 = async (options = {}) => {
 
             report.link_extraction_report[url] = {
                 status: false,
+                provider: providerId,
+                strategy: providerCollects ? 'provider' : 'generic',
                 jobLinksFound: 0,
                 error: error.message
             };
