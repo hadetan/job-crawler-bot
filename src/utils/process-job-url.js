@@ -1,18 +1,12 @@
 const path = require('path');
 const fs = require('fs');
 const config = require('../config');
-const {
-    normalizeURL,
-    log,
-    extractCompanyName,
-    getProcessedJobs,
-    getNextJobNumber,
-    saveJobToFile
-} = require('../utils');
+const { normalizeURL, log, extractCompanyName, getProcessedJobs, getNextJobNumber, saveJobToFile } = require('../utils');
 const { extractJobLinks } = require('../utils/job-links');
 const extractJobDetails = require('../utils/extract-job-details');
 const { updateJobStatus, saveDetailReport } = require('./request-helpers');
 const { findProviderByUrl, getProviderById, DEFAULT_PROVIDER_ID } = require('../job-boards');
+const { createPageController, configurePage } = require('../utils/browser');
 
 /**
  * Process a single job URL with retry logic
@@ -37,13 +31,29 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
         reportPath,
         currentRetryCount = 0,
         depth = 0,
-        providerId: providerIdHint = DEFAULT_PROVIDER_ID
+        providerId: providerIdHint = DEFAULT_PROVIDER_ID,
+        jobRecord = null
     } = opts;
 
     const providerFromRecord = providerIdHint ? getProviderById(providerIdHint) : null;
     const providerFromUrl = findProviderByUrl(url);
     const provider = providerFromRecord || providerFromUrl || null;
     const resolvedProviderId = provider ? provider.id : (providerIdHint || DEFAULT_PROVIDER_ID);
+    const providerSupportsDetail = provider && typeof provider.fetchJobDetail === 'function';
+    const providerUsesBrowser = providerSupportsDetail ? provider.usesBrowser !== false : true;
+
+    let providerContext = null;
+    if (provider && typeof provider.prepareJobDetail === 'function') {
+        try {
+            providerContext = await provider.prepareJobDetail({
+                url,
+                jobRecord,
+                logger: log
+            });
+        } catch (prepareError) {
+            log.warn(`Provider ${resolvedProviderId} prepareJobDetail failed for ${url}: ${prepareError.message}`);
+        }
+    }
 
     log.progress(`Processing job ${index + 1}/${total}: ${url} (provider: ${resolvedProviderId})`);
 
@@ -52,37 +62,30 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
     const companyName = extractCompanyName(url);
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-        const page = await browser.newPage();
+        const pageController = createPageController(browser);
+        let detailStrategy = 'unknown';
+        let usedProviderExtractor = false;
 
         try {
-            await page.setUserAgent(config.crawler.userAgent);
-            await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
-            await page.setViewport({ width: 1920, height: 1080 });
-
-            await page.setExtraHTTPHeaders({
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            });
-
             let jobData = null;
-            let usedProviderExtractor = false;
+            let pageForProvider = null;
 
-            if (provider && typeof provider.fetchJobDetail === 'function') {
+            if (providerSupportsDetail) {
                 try {
+                    pageForProvider = providerUsesBrowser ? await pageController.ensurePage() : null;
                     const providerResult = await provider.fetchJobDetail({
-                        page,
+                        page: pageForProvider,
                         url,
                         providerId: resolvedProviderId,
                         attempt,
-                        logger: log
+                        logger: log,
+                        context: providerContext || undefined
                     });
 
                     if (providerResult) {
                         jobData = providerResult;
                         usedProviderExtractor = true;
+                        detailStrategy = providerResult.strategy || `${resolvedProviderId}-provider`;
                     }
                 } catch (providerError) {
                     log.warn(`Provider ${resolvedProviderId} fetchJobDetail failed for ${url}: ${providerError.message}`);
@@ -90,10 +93,26 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             }
 
             if (!jobData) {
-                if (provider && typeof provider.fetchJobDetail === 'function') {
+                if (providerSupportsDetail) {
                     log.info(`Provider ${resolvedProviderId} did not return job details for ${url}. Falling back to generic extractor.`);
                 }
-                jobData = await extractJobDetails(page, url);
+                const fallbackPage = await pageController.ensurePage();
+                jobData = await extractJobDetails(fallbackPage, url);
+                detailStrategy = jobData && jobData.source ? jobData.source : 'generic';
+            }
+
+            if (provider && typeof provider.postProcessJobDetail === 'function' && jobData) {
+                try {
+                    const refined = await provider.postProcessJobDetail({
+                        jobData,
+                        context: providerContext || undefined
+                    });
+                    if (refined) {
+                        jobData = refined;
+                    }
+                } catch (postProcessError) {
+                    log.warn(`Provider ${resolvedProviderId} postProcessJobDetail failed for ${url}: ${postProcessError.message}`);
+                }
             }
             const companyDir = path.join(jobsDir, companyName);
 
@@ -110,8 +129,13 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             if (jobData.source === 'structured-data') stats.structuredCount++;
             if (jobData.source === 'intelligent-analysis') stats.intelligentCount++;
 
+            if (!stats.detailStrategyCounts) {
+                stats.detailStrategyCounts = {};
+            }
+            stats.detailStrategyCounts[detailStrategy] = (stats.detailStrategyCounts[detailStrategy] || 0) + 1;
+
             const extractionTag = jobData.source ? `${jobData.source}${usedProviderExtractor ? ' (provider)' : ''}` : (usedProviderExtractor ? 'provider' : 'unknown');
-            log.info(`Extracted via ${extractionTag}`);
+            log.info(`Extracted via ${extractionTag} [strategy: ${detailStrategy}]`);
             log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}" [provider: ${resolvedProviderId}]`);
 
             if (jobsCsvPath) {
@@ -129,17 +153,18 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
 
                 detailReport.detail_extraction_report[companyName].passedUrls.push({
                     url,
-                    provider: resolvedProviderId
+                    provider: resolvedProviderId,
+                    strategy: detailStrategy
                 });
 
                 saveDetailReport(reportPath, detailReport);
             }
 
-            await page.close();
+            await pageController.release();
             return; // Success - exit retry loop
 
         } catch (error) {
-            await page.close();
+            await pageController.release();
             lastError = error;
 
             const isRetryable =
@@ -170,6 +195,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             if (depth < 1) {
                 const page = await browser.newPage();
                 try {
+                    await configurePage(page);
                     const isActualListingPage = await page.evaluate(() => {
                         const title = document.title.toLowerCase();
                         const h1 = document.querySelector('h1');
