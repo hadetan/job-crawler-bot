@@ -45,7 +45,7 @@ const setupJobBoardsFolder = (outputDir, requestId) => {
 };
 
 /**
- * Load report.json for a given request ID
+ * Load report.json for Stage 1
  * @param {string} reportPath - Path to report.json
  * @returns {object} Report object
  */
@@ -75,12 +75,48 @@ const loadReport = (reportPath) => {
 };
 
 /**
+ * Load report.json for Stage 2
+ * @param {string} reportPath - Path to report.json
+ * @returns {object} Report object
+ */
+const loadLinkReport = (reportPath) => {
+    if (!fs.existsSync(reportPath)) {
+        return { link_extraction_report: {} };
+    }
+
+    try {
+        const content = fs.readFileSync(reportPath, 'utf-8');
+        const report = JSON.parse(content);
+
+        if (!report.link_extraction_report) {
+            report.link_extraction_report = {};
+        }
+
+        return report;
+    } catch (error) {
+        return { link_extraction_report: {} };
+    }
+};
+
+/**
  * Save report.json for a given request ID
  * @param {string} reportPath - Path to report.json
  * @param {object} report - Report object to save
  */
 const saveReport = (reportPath, report) => {
     fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+};
+
+/**
+ * Save report.json for Stage 2 - only saves link_extraction_report
+ * @param {string} reportPath - Path to report.json
+ * @param {object} report - Report object to save
+ */
+const saveLinkReport = (reportPath, report) => {
+    const cleanReport = {
+        link_extraction_report: report.link_extraction_report || {}
+    };
+    fs.writeFileSync(reportPath, JSON.stringify(cleanReport, null, 2), 'utf-8');
 };
 
 /**
@@ -462,19 +498,28 @@ const loadDetailReport = (reportPath) => {
 
     try {
         const content = fs.readFileSync(reportPath, 'utf-8');
-        return JSON.parse(content);
+        const report = JSON.parse(content);
+
+        if (!report.detail_extraction_report) {
+            report.detail_extraction_report = {};
+        }
+
+        return report;
     } catch (error) {
         return { detail_extraction_report: {} };
     }
 };
 
 /**
- * Save detail extraction report.json for Stage 3
+ * Save detail extraction report.json for Stage 3 - only saves detail_extraction_report
  * @param {string} reportPath - Path to report.json
  * @param {object} report - Report object to save
  */
 const saveDetailReport = (reportPath, report) => {
-    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+    const cleanReport = {
+        detail_extraction_report: report.detail_extraction_report || {}
+    };
+    fs.writeFileSync(reportPath, JSON.stringify(cleanReport, null, 2), 'utf-8');
 };
 
 /**
@@ -508,7 +553,9 @@ module.exports = {
     generateRequestId,
     setupJobBoardsFolder,
     loadReport,
+    loadLinkReport,
     saveReport,
+    saveLinkReport,
     requestIdExists,
     appendToGoogleResultsCsv,
     getExistingUrlsFromCsv,

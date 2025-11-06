@@ -4,7 +4,7 @@ const pLimit = require('p-limit');
 const config = require('../config');
 const log = require('../utils/logger');
 const { extractJobLinks } = require('../utils/job-links');
-const { generateRequestId, setupJobLinksFolder, loadReport, saveReport, readGoogleResultsCsv, writeGoogleResultsCsv, getExistingJobUrls, appendToJobsCsv } = require('../utils/request-helpers');
+const { generateRequestId, setupJobLinksFolder, loadLinkReport, saveLinkReport, readGoogleResultsCsv, writeGoogleResultsCsv, getExistingJobUrls, appendToJobsCsv } = require('../utils/request-helpers');
 const pupBrowser = require('../utils/browser');
 
 const runStage2 = async (options = {}) => {
@@ -37,7 +37,7 @@ const runStage2 = async (options = {}) => {
     const { jobLinksDir, jobsCsvPath, reportPath } = setupJobLinksFolder(config.output.dir, jobId);
     log.info(`Job links folder: ${jobLinksDir}`);
 
-    const report = loadReport(reportPath);
+    const report = loadLinkReport(reportPath);
     if (!report.link_extraction_report) {
         report.link_extraction_report = {};
     }
@@ -61,7 +61,7 @@ const runStage2 = async (options = {}) => {
         writeGoogleResultsCsv(googleResultsCsv, googleRows);
 
         report.link_extraction_report = {};
-        saveReport(reportPath, report);
+        saveLinkReport(reportPath, report);
 
         log.info(`Clean flag detected. Reset ${resetCount} job board URLs to pending`);
     }
@@ -139,7 +139,7 @@ const runStage2 = async (options = {}) => {
                 jobLinksFound: jobLinks.length,
                 error: null
             };
-            saveReport(reportPath, report);
+            saveLinkReport(reportPath, report);
 
             const googleRows = readGoogleResultsCsv(googleResultsCsv);
             const rowToUpdate = googleRows.find(r => r.URL === url);
@@ -159,7 +159,7 @@ const runStage2 = async (options = {}) => {
                 jobLinksFound: 0,
                 error: error.message
             };
-            saveReport(reportPath, report);
+            saveLinkReport(reportPath, report);
 
             const googleRows = readGoogleResultsCsv(googleResultsCsv);
             const rowToUpdate = googleRows.find(r => r.URL === url);
