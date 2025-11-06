@@ -67,7 +67,31 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
                 'Upgrade-Insecure-Requests': '1'
             });
 
-            const jobData = await extractJobDetails(page, url);
+            let jobData = null;
+            let usedProviderExtractor = false;
+
+            if (provider && typeof provider.fetchJobDetail === 'function') {
+                try {
+                    const providerResult = await provider.fetchJobDetail({
+                        page,
+                        url,
+                        providerId: resolvedProviderId,
+                        attempt,
+                        logger: log
+                    });
+
+                    if (providerResult) {
+                        jobData = providerResult;
+                        usedProviderExtractor = true;
+                    }
+                } catch (providerError) {
+                    log.warn(`Provider ${resolvedProviderId} fetchJobDetail failed for ${url}: ${providerError.message}`);
+                }
+            }
+
+            if (!jobData) {
+                jobData = await extractJobDetails(page, url);
+            }
             const companyDir = path.join(jobsDir, companyName);
 
             if (!fs.existsSync(companyDir)) {
@@ -83,7 +107,8 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             if (jobData.source === 'structured-data') stats.structuredCount++;
             if (jobData.source === 'intelligent-analysis') stats.intelligentCount++;
 
-            log.info(`Extracted via ${jobData.source}`);
+            const extractionTag = jobData.source ? `${jobData.source}${usedProviderExtractor ? ' (provider)' : ''}` : (usedProviderExtractor ? 'provider' : 'unknown');
+            log.info(`Extracted via ${extractionTag}`);
             log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}" [provider: ${resolvedProviderId}]`);
 
             if (jobsCsvPath) {

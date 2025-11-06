@@ -121,23 +121,41 @@ const runStage2 = async (options = {}) => {
             await page.setViewport({ width: 1920, height: 1080 });
             await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
 
+            const normalizeLinkUrl = (rawUrl) => {
+                if (!rawUrl) {
+                    return rawUrl;
+                }
+
+                if (provider && typeof provider.normalizeJobUrl === 'function') {
+                    try {
+                        return provider.normalizeJobUrl(rawUrl) || rawUrl;
+                    } catch (normalizationError) {
+                        log.warn(`Provider ${providerId} normalizeJobUrl failed for ${rawUrl}: ${normalizationError.message}`);
+                    }
+                }
+
+                return rawUrl;
+            };
+
             const normalizeJobLinkEntry = (value) => {
                 if (!value && value !== 0) {
                     return null;
                 }
 
                 if (typeof value === 'string') {
-                    return { url: value, providerId };
+                    const normalizedUrl = normalizeLinkUrl(value);
+                    return { url: normalizedUrl, providerId };
                 }
 
                 if (typeof value === 'object') {
                     const entryUrl = value.url || value.URL || value.href || '';
+                    const normalizedUrl = normalizeLinkUrl(entryUrl);
                     if (!entryUrl) {
                         return null;
                     }
 
                     return {
-                        url: entryUrl,
+                        url: normalizedUrl,
                         providerId: value.providerId || value.provider || value.PROVIDER || providerId
                     };
                 }
