@@ -7,8 +7,8 @@ A 3-stage job crawler system that discovers job listing pages via multiple searc
   - **Google Custom Search API** - Traditional Google search with up to 100 results
   - **SerpAPI** - Multi-engine support (Google, Bing, Yahoo, DuckDuckGo, etc.)
   - Unified folder structure with engine-specific progress tracking
-- **Stage 2**: Visits job listing pages with Puppeteer and extracts direct job posting links
-- **Stage 3**: Scrapes detailed job information (title, description, location, skills) from job pages
+- **Stage 2**: Provider-aware job link harvesting that drives Greenhouse and Lever boards via a shared registry
+- **Stage 3**: Job detail extraction with provider-specific APIs (Lever) and DOM fallbacks (Greenhouse and others)
 - Full control via environment variables (concurrency, headless mode, timeouts, selectors)
 - Automatic deduplication across multiple runs
 - Retry logic with exponential backoff
@@ -70,6 +70,20 @@ npm start -- --stage=3 --run=my-jobs
 ```
 
 ## Usage
+
+### Job Board Provider Architecture
+
+Stage 2 and Stage 3 resolve job boards through `src/job-boards/registry.js`. Each provider module describes how to:
+- detect URLs (`matchesUrl`),
+- derive board context (company slug, filters),
+- collect job links (`collectJobLinks`), and
+- fetch job details (`fetchJobDetail`).
+
+Current providers ship with first-class support for:
+- `greenhouse` – wraps the legacy heuristics used by the crawler since inception.
+- `lever` – consumes the Lever REST API for listings and job details, with DOM fallbacks when the API is unavailable.
+
+Adding new boards (Workday, Ashby, etc.) involves dropping a module in `src/job-boards/providers/` and registering it via the registry. Consult existing providers for contract examples.
 
 ### Run All Stages Sequentially
 
@@ -178,10 +192,13 @@ npm start -- --stage=2 --run=nov_03_gh --id=nov_03_crawl --clean
 - **Job ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
 - **Request ID Required**: Must specify `--run={requestId}` to indicate which Stage 1 output to read
 - **Dedicated Folders**: Results saved in `/output/job_links/{jobId}/` with separate CSV and progress tracking
+- **Provider Registry**: Detects supported boards (Greenhouse, Lever) and routes extraction to provider-specific collectors
+- **API-First Lever Support**: When Stage 2 encounters a Lever board it uses the `/v0/postings/<slug>?mode=json` API (with pagination and filter awareness) before falling back to DOM scraping
 - **Checkpoint & Resume**: Automatically resumes from unprocessed or failed job board URLs
 - **Clean Flag**: Reset job board URLs to pending with `--clean` (preserves extracted job links)
 - **Duplicate Handling**: Automatically skips duplicate job URLs across different job boards
 - **STATUS Updates**: Updates Stage 1's search-results.csv with completion status and job counts
+- **Provider Tracking**: `jobs.csv` includes a `PROVIDER` column when available while remaining backward compatible with legacy files
 - **Error Recovery**: Continues processing remaining URLs even if some fail
 
 #### Stage 3: Job Details Extraction
@@ -206,6 +223,7 @@ npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction --force
 - **Extraction ID System**: Each run gets a unique ID (auto-generated 6-digit or custom via `--id`)
 - **Run ID Required**: Must specify `--run={jobId}` to indicate which Stage 2 output to read
 - **Dedicated Folders**: Results saved in `/output/jobs/{extractionId}/` with company-based organization
+- **Provider-Aware Details**: Uses provider modules to fetch structured data (e.g., Lever API) before falling back to generic DOM/structured extraction
 - **Retry Logic**: Automatically retries failed extractions up to 3 times (configurable via `MAX_RETRY_COUNT`)
 - **Resume Capability**: Skips completed jobs and continues from pending/failed URLs
 - **Force Mode**: Use `--force` to retry only failed URLs, ignoring retry count limits
@@ -487,6 +505,16 @@ All stages support:
 - Re-run Stage 2 with the same jobId to retry failed URLs
 - Common causes: page load timeouts, changed page structure, rate limiting
 
+#### Lever Board Detected but No Jobs Extracted
+
+**Message**: `Lever provider detected for https://jobs.lever.co/<slug> but returned 0 postings.`
+
+**Solution**:
+- Confirm the board slug matches an active Lever company by visiting the URL in a browser.
+- Embedded boards sometimes apply filters (e.g., location/team). Stage 2 logs any client-side filter combinations in `output/job_links/{jobId}/report.json` under `leverDiagnostics`. Verify the filters still return jobs via the Lever API.
+- If the board is private or requires authentication, supply alternate Stage 1 URLs or remove the embedded filters.
+- Retry the run with `--clean` to clear cached diagnostics after resolving the board configuration.
+
 ### Stage 3 Issues
 
 #### Missing --run Parameter
@@ -538,6 +566,15 @@ All stages support:
 - Update selectors in `.env` (JOB_TITLE_SELECTORS, JOB_DESCRIPTION_SELECTORS, etc.)
 - Some URLs may be listing pages or invalid job pages
 - Review failed URLs in `output/jobs/{extractionId}/report.json`
+
+#### Lever API Errors
+
+**Message**: `Lever provider failed with status 429` or other HTTP errors.
+
+**Solution**:
+- Lever enforces rate limits. Stage 3 automatically falls back to DOM scraping, but repeated 429s may succeed after a short delay.
+- Reduce `CONCURRENCY` in `.env` to limit parallel API requests.
+- Review logs for `leverFallback` entries to confirm fallback succeeded; failed URLs remain retriable via `--force` once the rate limit clears.
 
 ### Google API Issues
 
@@ -803,6 +840,17 @@ npm start -- --stage=2 --run=nov_03_gh --id=my_crawl --clean
 #         Processes all URLs again, adds new job links to existing jobs.csv
 ```
 
+**Scenario 3: Lever Board with Filters**
+```bash
+# Original URL points to an embedded Lever board with location filters applied
+npm start -- --stage=2 --run=lever_embed --id=lever_links
+# Output includes: "Lever provider collected 42 jobs (filters: location=Remote, team=Engineering)"
+
+# To override filters, supply a canonical hosted board URL instead
+npm start -- --stage=2 --run=lever_embed --id=lever_links --clean
+# Update Stage 1 inputs to https://jobs.lever.co/<slug> and rerun Stage 2
+```
+
 ### Handling Stage 3 Failures
 
 **Scenario 1: Some Job Extractions Fail**
@@ -858,6 +906,10 @@ job-crawler-bot/
 │   │   ├── stage1-search.js          # Multi-provider search crawler
 │   │   ├── stage2-links.js           # Job listing page crawler
 │   │   └── stage3-details.js         # Job details extractor
+│   ├── job-boards/
+│   │   ├── index.js                  # Provider exports
+│   │   ├── registry.js               # Provider registry and discovery
+│   │   └── providers/                # Greenhouse, Lever, (add more here)
 │   ├── search-providers/             # Search provider implementations
 │   │   ├── base-provider.js          # Abstract provider interface
 │   │   ├── google-custom-search.js   # Google Custom Search provider
