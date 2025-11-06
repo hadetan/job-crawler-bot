@@ -42,10 +42,9 @@ cp .env.example .env
 # 1. Add to .env:
 #    GOOGLE_API_KEY=your_key
 #    GOOGLE_SEARCH_ENGINE_ID=your_id
-#    SEARCH_QUERY=site:boards.greenhouse.io
 
 # 2. Run search
-npm start -- --stage=1 --id=my-search --use=google
+npm start -- --stage=1 --id=my-search --use=google --search=greenhouse
 
 # 3. Extract job links
 npm start -- --stage=2 --run=my-search --id=my-jobs
@@ -59,10 +58,9 @@ npm start -- --stage=3 --run=my-jobs
 ```bash
 # 1. Add to .env:
 #    SERP_API_KEY=your_key
-#    SEARCH_QUERY=site:boards.greenhouse.io
 
 # 2. Run search with your preferred engine
-npm start -- --stage=1 --id=my-search --use=serp --engine=bing
+npm start -- --stage=1 --id=my-search --use=serp --engine=bing --search=lever
 
 # 3. Extract job links (same as above)
 npm start -- --stage=2 --run=my-search --id=my-jobs
@@ -76,14 +74,14 @@ npm start -- --stage=3 --run=my-jobs
 ### Run All Stages Sequentially
 
 ```bash
-npm start
+npm start -- --search=greenhouse
 ```
 
 **Note**: You can also run the stages separately:
 
 ```bash
 # Recommended workflow:
-npm start -- --stage=1 --id=my_run
+npm start -- --stage=1 --id=my_run --search=greenhouse
 npm start -- --stage=2 --run=my_run --id=my_crawl
 npm start -- --stage=3 --run=my_crawl --id=my_extraction
 ```
@@ -94,40 +92,42 @@ npm start -- --stage=3 --run=my_crawl --id=my_extraction
 
 Stage 1 supports multiple search providers with request IDs, checkpointing, and resume functionality:
 
+**Important:** Every Stage 1 command requires a `--search=<target>` parameter. Available targets are defined in `src/constants/search-targets.js` (e.g., `--search=greenhouse`, `--search=lever`).
+
 **Available Providers:**
 - `google` - Google Custom Search API (default, max 10 pages/100 results)
 - `serp` - SerpAPI with multi-engine support (Google, Bing, Yahoo, DuckDuckGo, etc.)
 
 ```bash
 # Use default provider (Google Custom Search)
-npm start -- --stage=1
+npm start -- --stage=1 --search=greenhouse
 
 # Use Google Custom Search explicitly
-npm start -- --stage=1 --use=google
+npm start -- --stage=1 --use=google --search=greenhouse
 
 # Use SerpAPI with Google engine
-npm start -- --stage=1 --use=serp
+npm start -- --stage=1 --use=serp --search=lever
 
 # Use SerpAPI with Bing engine
-npm start -- --stage=1 --use=serp --engine=bing
+npm start -- --stage=1 --use=serp --engine=bing --search=lever
 
 # Use SerpAPI with Yahoo engine
-npm start -- --stage=1 --use=serp --engine=yahoo
+npm start -- --stage=1 --use=serp --engine=yahoo --search=lever
 
 # With custom request ID
-npm start -- --stage=1 --id=my-run --use=serp --engine=bing
+npm start -- --stage=1 --id=my-run --use=serp --engine=bing --search=lever
 
 # Resume from failed page (automatically detects and resumes)
-npm start -- --stage=1 --id=my-run --use=google
+npm start -- --stage=1 --id=my-run --use=google --search=greenhouse
 
 # Reset progress and start fresh (keeps CSV data)
-npm start -- --stage=1 --id=my-run --use=serp --clean
+npm start -- --stage=1 --id=my-run --use=serp --clean --search=lever
 
 # Override max pages (ignores MAX_PAGES env variable)
-npm start -- --stage=1 --id=my-run --use=serp --engine=duckduckgo --pages=30
+npm start -- --stage=1 --id=my-run --use=serp --engine=duckduckgo --pages=30 --search=lever
 
 # Combine with other options
-npm start -- --stage=1 --id=my-run --use=google --pages=8 --clean
+npm start -- --stage=1 --id=my-run --use=google --pages=8 --clean --search=greenhouse
 ```
 
 **Unified Folder Structure:**
@@ -229,6 +229,7 @@ npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction --force
 
 | Option | Description | Example | Default |
 |--------|-------------|---------|---------|
+| `--search=TARGET` | Search target key defined in `src/constants/search-targets.js` | `--search=greenhouse` | **Required** |
 | `--use=PROVIDER` | Search provider to use (`google` or `serp`) | `--use=serp` | `google` |
 | `--engine=ENGINE` | Search engine (SerpAPI only: `google`, `bing`, `yahoo`, `duckduckgo`, etc.) | `--engine=bing` | `google` |
 | `--pages=N` | Override MAX_PAGES env variable | `--pages=30` | Uses `MAX_PAGES` from env |
@@ -268,7 +269,6 @@ All settings are configured via the `.env` file. Copy `.env.example` to `.env` a
 | `GOOGLE_API_KEY` | Your Google Custom Search API key | `AIzaSyD...` | Google provider |
 | `GOOGLE_SEARCH_ENGINE_ID` | Your search engine ID | `a1b2c3d4e5...` | Google provider |
 | `SERP_API_KEY` | Your SerpAPI key | `abc123...` | SerpAPI provider |
-| `SEARCH_QUERY` | Search query to use | `site:boards.greenhouse.io` | All providers |
 
 **Note**: You need at least one provider configured (either Google Custom Search OR SerpAPI).
 

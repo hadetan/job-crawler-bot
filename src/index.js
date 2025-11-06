@@ -11,6 +11,7 @@ const parseArgs = () => {
     const useArg = args.find(arg => arg.startsWith('--use='));
     const engineArg = args.find(arg => arg.startsWith('--engine='));
     const pagesArg = args.find(arg => arg.startsWith('--pages='));
+    const searchArg = args.find(arg => arg.startsWith('--search='));
     const cleanFlag = args.includes('--clean');
     const forceFlag = args.includes('--force');
 
@@ -45,18 +46,23 @@ const parseArgs = () => {
         if (isNaN(pages) || pages <= 0) pages = null;
     }
 
-    return { stage, requestId, runId, provider, searchEngine, pages, clean: cleanFlag, force: forceFlag };
+    let search = null;
+    if (searchArg) {
+        search = searchArg.split('=')[1];
+    }
+
+    return { stage, requestId, runId, provider, searchEngine, pages, search, clean: cleanFlag, force: forceFlag };
 };
 
 (async () => {
     const startTime = Date.now();
 
     try {
-        const { stage, requestId, runId, provider, searchEngine, pages, clean, force } = parseArgs();
+    const { stage, requestId, runId, provider, searchEngine, pages, search, clean, force } = parseArgs();
 
         if (stage !== null) {
             if (stage === 1) {
-                await runStage1({ requestId, provider, searchEngine, pages, clean });
+                await runStage1({ requestId, provider, searchEngine, pages, search, clean });
             } else if (stage === 2) {
                 await runStage2({ runId: runId, jobId: requestId, clean });
             } else if (stage === 3) {
@@ -66,7 +72,7 @@ const parseArgs = () => {
                 process.exit(1);
             }
         } else {
-            const stage1Id = await runStage1({ requestId, provider, searchEngine, clean });
+            const stage1Id = await runStage1({ requestId, provider, searchEngine, search, clean });
             const stage2Id = await runStage2({ requestId: stage1Id, clean });
             await runStage3({ runId: stage2Id, force });
         }

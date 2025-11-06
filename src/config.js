@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const requiredEnvVars = ['GOOGLE_API_KEY', 'GOOGLE_SEARCH_ENGINE_ID', 'SEARCH_QUERY'];
+const requiredEnvVars = ['GOOGLE_API_KEY', 'GOOGLE_SEARCH_ENGINE_ID'];
 
 requiredEnvVars.forEach(varName => {
     if (!process.env[varName]) {
@@ -47,7 +47,6 @@ const config = {
         }
     },
     defaultSearchProvider: process.env.DEFAULT_SEARCH_PROVIDER || 'google',
-    searchQuery: process.env.SEARCH_QUERY,
     crawler: {
         concurrency: parseNumber(process.env.CONCURRENCY, 5),
         maxPages: parseNumber(process.env.MAX_PAGES, 10),

@@ -1,27 +1,55 @@
 const config = require('../config');
 const log = require('../utils/logger');
 const ProviderFactory = require('../search-providers/provider-factory');
+const { getSearchQuery, listSearchTargets } = require('../constants/search-targets');
 const { generateRequestId, setupJobBoardsFolder, loadReport, saveReport, requestIdExists, appendToGoogleResultsCsv, getExistingUrlsFromCsv } = require('../utils/request-helpers');
 
 const runStage1 = async (options = {}) => {
     let providerName = options.provider || config.defaultSearchProvider;
     const searchEngine = options.searchEngine;
+    const searchKey = options.search;
+
+    if (!searchKey) {
+        log.error('No search target provided. Please rerun with --search=<target>.');
+
+        const availableTargets = listSearchTargets();
+        if (availableTargets.length > 0) {
+            log.error(`Available targets: ${availableTargets.join(', ')}`);
+        }
+
+        process.exit(1);
+    }
+
+    const searchQuery = getSearchQuery(searchKey);
+
+    if (!searchQuery) {
+        log.error(`Unknown search target '${searchKey}'.`);
+
+        const availableTargets = listSearchTargets();
+        if (availableTargets.length > 0) {
+            log.error(`Available targets: ${availableTargets.join(', ')}`);
+        }
+
+        process.exit(1);
+    }
+
+    log.info(`Using search target '${searchKey}' -> ${searchQuery}`);
 
     let provider;
     try {
         // Validate --engine parameter usage
         if (searchEngine && providerName !== 'serp') {
-            log.warn(`⚠️  Warning: --engine parameter is only supported with --use=serp. Ignoring.`);
+            log.warn(`Warning: --engine parameter is only supported with --use=serp. Ignoring.`);
         }
 
         const configuredProviders = ProviderFactory.getConfiguredProviders();
         if (configuredProviders.length === 0) {
-            log.error('❌ No search providers are configured!\nPlease add at least one API key to your .env file:\n  - GOOGLE_API_KEY and GOOGLE_SEARCH_ENGINE_ID for Google Custom Search\n  - SERP_API_KEY for SerpAPI');
+            log.error('No search providers are configured!\nPlease add at least one API key to your .env file:\n  - GOOGLE_API_KEY and GOOGLE_SEARCH_ENGINE_ID for Google Custom Search\n  - SERP_API_KEY for SerpAPI');
             process.exit(1);
         }
 
         if (!ProviderFactory.isAvailable(providerName)) {
-            log.error(`❌ Search provider '${providerName}' is not configured or unavailable.`);
+            log.error(`Search provider '${providerName}' is not configured or unavailable.`);
             log.error('');
             log.error('Available providers:');
 
@@ -46,7 +74,7 @@ const runStage1 = async (options = {}) => {
         provider = ProviderFactory.create(providerName, { engine: searchEngine });
 
     } catch (error) {
-        log.error(`❌ Failed to initialize search provider: ${error.message}`);
+        log.error(`Failed to initialize search provider: ${error.message}`);
         process.exit(1);
     }
 
@@ -149,7 +177,7 @@ const runStage1 = async (options = {}) => {
                     pageReport.error?.statusText ||
                     'Unknown error';
 
-                log.error(`⚠️  Max retry limit (${config.retry.maxRetryCount}) reached for page ${page}.`);
+                log.error(`Max retry limit (${config.retry.maxRetryCount}) reached for page ${page}.`);
                 log.error(`Error: ${errorMsg}`);
                 log.error(`This page will be skipped. You can review the full error in report.json.`);
                 log.error(`Exiting...`);
@@ -163,7 +191,7 @@ const runStage1 = async (options = {}) => {
         }
 
         try {
-            const results = await provider.search(config.searchQuery, page);
+            const results = await provider.search(searchQuery, page);
 
             if (!results || results.length === 0) {
                 log.info('No more results found, stopping pagination');
