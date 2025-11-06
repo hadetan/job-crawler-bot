@@ -129,7 +129,8 @@ const runStage3 = async (options = {}) => {
                     detailReport,
                     reportPath,
                     currentRetryCount: parseInt(job.RETRY, 10) || 0,
-                    providerId: job.PROVIDER || DEFAULT_PROVIDER_ID
+                    providerId: job.PROVIDER || DEFAULT_PROVIDER_ID,
+                    jobRecord: job
                 }
             ))
         )
@@ -140,12 +141,21 @@ const runStage3 = async (options = {}) => {
     // Log summary
     log.success(`Stage 3 complete: ${stats.successCount} jobs saved to ${jobsDir}`);
     log.info(`Summary - Total processed: ${urlsToProcess.length}, Successful: ${stats.successCount}, Failed: ${stats.failedCount}`);
-    
+
     if (skippedMaxRetries > 0) {
         log.info(`URLs skipped (max retries reached): ${skippedMaxRetries}`);
     }
-    
+
     log.info(`Extraction methods - Structured Data: ${stats.structuredCount}, Intelligent Analysis: ${stats.intelligentCount}`);
+
+    if (stats.detailStrategyCounts && Object.keys(stats.detailStrategyCounts).length > 0) {
+        log.info('Detail strategies used:');
+        Object.entries(stats.detailStrategyCounts)
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([strategy, count]) => {
+                log.info(`  ${strategy}: ${count}`);
+            });
+    }
 
     if (Object.keys(stats.companyJobCounts).length > 0) {
         log.info('Jobs saved by company:');

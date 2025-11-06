@@ -1,10 +1,11 @@
-const axios = require('axios');
 const config = require('../../config');
 const { normalizeURL } = require('../../utils');
+const { createProviderHttpClient, resolveDescription, collectListText, normalizeWhitespace } = require('../detail-helpers');
 
 const LEVER_PROVIDER_ID = 'lever';
 const LEVER_API_BASE = 'https://jobs.lever.co/v0/postings';
 const SUPPORTED_FILTER_KEYS = new Set(['team', 'department', 'location', 'commitment', 'worktype', 'worktypev2']);
+const httpClient = createProviderHttpClient();
 
 const ensurePageLoaded = async (page, url) => {
     await page.goto(url, {
@@ -129,7 +130,7 @@ const discoverSlugFromPage = async (page, url) => {
                 }
 
                 applyFilters(resolved.search);
-            } catch (_) {}
+            } catch (_) { }
         });
 
         document.querySelectorAll('[data-lever-domain], [data-lever-job-board]').forEach((element) => {
@@ -161,10 +162,7 @@ const discoverSlugFromPage = async (page, url) => {
 
         const [slug] = slugCandidates;
 
-        return {
-            companySlug: slug || null,
-            filters
-        };
+        return { companySlug: slug || null, filters };
     }, Array.from(SUPPORTED_FILTER_KEYS));
 };
 
@@ -216,12 +214,7 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
     let safetyCounter = 0;
     const jobUrls = [];
     const dedupeKeys = new Set();
-    const diagnostics = {
-        pages: 0,
-        totalPostings: 0,
-        companySlug,
-        filters
-    };
+    const diagnostics = { pages: 0, totalPostings: 0, companySlug, filters };
 
     while (safetyCounter < 20) {
         const url = `${LEVER_API_BASE}/${companySlug}`;
@@ -230,9 +223,8 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
             query.set('skip', String(skip));
         }
 
-        const response = await axios.get(url, {
+        const response = await httpClient.get(url, {
             params: Object.fromEntries(query.entries()),
-            timeout: config.crawler.pageTimeout
         });
 
         if (!Array.isArray(response.data) || response.data.length === 0) {
@@ -266,7 +258,7 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
     }
 
     return {
-    jobUrls,
+        jobUrls,
         diagnostics
     };
 };
@@ -308,69 +300,84 @@ const collectJobLinks = async ({ page, url, logger }) => {
             providerId: LEVER_PROVIDER_ID,
             jobUrls: [],
             strategy: 'lever-api-failed',
-            diagnostics: {
-                error: apiError.message
-            }
+            diagnostics: { error: apiError.message }
         };
     }
 };
 
-const fetchJobDetail = async ({ url, logger }) => {
-    const { companySlug, postingId } = parseLeverContextFromUrl(url);
+const fetchJobDetail = async ({ url, logger, context }) => {
+    const derivedContext = context && (context.companySlug || context.postingId) ? context : parseLeverContextFromUrl(url);
+    const { companySlug, postingId } = derivedContext || {};
 
     if (!companySlug || !postingId) {
         if (logger) {
             logger.warn(`Lever provider could not parse slug/posting ID from ${url}`);
         }
-        return null;
+
+        return {
+            job: null,
+            strategy: 'lever-api',
+            diagnostics: {
+                error: 'missing-context',
+                companySlug: companySlug || null,
+                postingId: postingId || null
+            }
+        };
     }
 
     const endpoint = `${LEVER_API_BASE}/${companySlug}/${postingId}`;
+    const diagnostics = { companySlug, postingId, endpoint };
+
+    const startedAt = Date.now();
 
     try {
-        const response = await axios.get(endpoint, {
-            params: { mode: 'json' },
-            timeout: config.crawler.pageTimeout
-        });
+        const response = await httpClient.get(endpoint, { params: { mode: 'json' } });
+
+        diagnostics.status = response.status;
+        diagnostics.durationMs = Date.now() - startedAt;
 
         const data = response.data;
         if (!data) {
-            return null;
+            diagnostics.error = 'empty-response';
+            return {
+                job: null,
+                strategy: 'lever-api',
+                diagnostics
+            };
         }
 
         const categories = data.categories || {};
-        const location = (categories.location || categories.workLocation || (data.additional && data.additional.location) || '').trim() || 'Remote / Multiple';
-        const description = (data.descriptionPlain || data.description || '').trim();
-        const title = (data.text || data.title || '').trim();
+        const location = normalizeWhitespace(
+            categories.location ||
+            categories.workLocation ||
+            (data.additional && (data.additional.location || data.additional.workLocation)) ||
+            'Remote / Multiple'
+        ) || 'Remote / Multiple';
+
+        const description = resolveDescription({
+            plainText: data.descriptionPlain || data.descriptionText || '',
+            html: data.description || ''
+        });
+
+        const title = normalizeWhitespace(data.text || data.title || '');
 
         if (!title || title.length < 3 || !description || description.length < 50) {
-            return null;
-        }
-        const skills = [];
-
-        if (Array.isArray(data.lists)) {
-            data.lists.forEach((list) => {
-                if (Array.isArray(list.content)) {
-                    list.content.forEach((item) => {
-                        if (item && item.text) {
-                            const value = item.text.trim();
-                            if (value) {
-                                skills.push(value);
-                            }
-                        }
-                    });
-                }
-            });
+            diagnostics.error = 'insufficient-content';
+            return {
+                job: null,
+                strategy: 'lever-api',
+                diagnostics
+            };
         }
 
-        const uniqueSkills = Array.from(new Set(skills));
+        const skills = collectListText(Array.isArray(data.lists) ? data.lists : []);
 
-        return {
+        const job = {
             url,
             title,
             location,
             description,
-            skills: uniqueSkills,
+            skills,
             source: 'lever-api',
             rawMeta: {
                 commitment: categories.commitment || (data.additional && data.additional.commitment) || null,
@@ -380,11 +387,25 @@ const fetchJobDetail = async ({ url, logger }) => {
                 workplaceType: categories.workType || null
             }
         };
+
+        diagnostics.skillCount = job.skills.length;
+        diagnostics.descriptionLength = job.description.length;
+
+        return { job, strategy: 'lever-api', diagnostics };
     } catch (error) {
         if (logger) {
             logger.warn(`Lever job detail API failed for ${url}: ${error.message}`);
         }
-        return null;
+
+        return {
+            job: null,
+            strategy: 'lever-api',
+            diagnostics: {
+                ...diagnostics,
+                durationMs: diagnostics.durationMs || (Date.now() - startedAt),
+                error: error.message
+            }
+        };
     }
 };
 

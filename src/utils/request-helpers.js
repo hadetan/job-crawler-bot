@@ -13,9 +13,8 @@ const escapeCsvField = (field) => {
 
 const formatCsvLine = (fields) => fields.map(escapeCsvField).join(',');
 
-const JOBS_CSV_HEADER = ['URL', 'PROVIDER', 'STATUS', 'REMARKS', 'FILENAME', 'RETRY'];
+const JOBS_CSV_HEADER = ['URL', 'PROVIDER', 'STATUS', 'REMARKS', 'FILENAME', 'DETAIL_STRATEGY', 'RETRY'];
 const JOBS_CSV_HEADER_LINE = JOBS_CSV_HEADER.join(',');
-
 const ensureJobsCsvHasProviderColumn = (csvPath) => {
     if (!fs.existsSync(csvPath)) {
         return false;
@@ -23,36 +22,47 @@ const ensureJobsCsvHasProviderColumn = (csvPath) => {
 
     const content = fs.readFileSync(csvPath, 'utf-8');
     const lines = content.split('\n');
-    if (lines.length === 0) {
+    if (lines.length === 0 || !lines[0]) {
         return false;
     }
 
-    const headerFields = parseCSVLine(lines[0]).map(field => field.trim().toUpperCase());
-    if (headerFields.includes('PROVIDER')) {
-        return false; // Already upgraded
+    const headerFields = parseCSVLine(lines[0]);
+    const normalizedHeader = headerFields.map(field => field.trim().toUpperCase());
+    const headerMap = normalizedHeader.reduce((acc, field, index) => {
+        acc[field] = index;
+        return acc;
+    }, {});
+
+    const needsRewrite = JOBS_CSV_HEADER.some(column => !(column in headerMap));
+
+    if (!needsRewrite && headerFields.length === JOBS_CSV_HEADER.length) {
+        return false;
     }
 
     const upgradedLines = [];
+
     for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
-        if (!line) {
+        if (!line || !line.trim()) {
             continue;
         }
+
         const fields = parseCSVLine(line);
         const upgraded = [
-            fields[0] || '',
-            '',
-            fields[1] || '',
-            fields[2] || '',
-            fields[3] || '',
-            fields[4] || ''
+            fields[headerMap.URL] || '',
+            fields[headerMap.PROVIDER] || '',
+            fields[headerMap.STATUS] || '',
+            fields[headerMap.REMARKS] || '',
+            fields[headerMap.FILENAME] || '',
+            fields[headerMap.DETAIL_STRATEGY] || '',
+            fields[headerMap.RETRY] || ''
         ];
+
         upgradedLines.push(formatCsvLine(upgraded));
     }
 
-    const nextLines = upgradedLines.join('\n');
-    const finalContent = nextLines ? `${JOBS_CSV_HEADER_LINE}\n${nextLines}\n` : `${JOBS_CSV_HEADER_LINE}\n`;
-    fs.writeFileSync(csvPath, finalContent, 'utf-8');
+    const body = upgradedLines.length ? `${upgradedLines.join('\n')}\n` : '';
+    fs.writeFileSync(csvPath, `${JOBS_CSV_HEADER_LINE}\n${body}`, 'utf-8');
     return true;
 };
 
@@ -427,10 +437,12 @@ const appendToJobsCsv = (csvPath, jobEntries, defaultProviderId = DEFAULT_PROVID
 
             let url = entry;
             let providerId = defaultProviderId;
+            let detailStrategy = '';
 
             if (typeof entry === 'object') {
                 url = entry.url || entry.URL || entry.href || '';
                 providerId = entry.providerId || entry.provider || entry.PROVIDER || defaultProviderId;
+                detailStrategy = entry.detailStrategy || entry.DETAIL_STRATEGY || '';
             }
 
             if (!url) {
@@ -443,6 +455,7 @@ const appendToJobsCsv = (csvPath, jobEntries, defaultProviderId = DEFAULT_PROVID
                 'pending',
                 '',
                 '',
+                detailStrategy || '',
                 '0'
             ]);
         })
@@ -492,6 +505,7 @@ const readJobsCsv = (csvPath) => {
             STATUS: fields[headerMap.STATUS] || '',
             REMARKS: fields[headerMap.REMARKS] || '',
             FILENAME: fields[headerMap.FILENAME] || '',
+            DETAIL_STRATEGY: fields[headerMap.DETAIL_STRATEGY] || '',
             RETRY: fields[headerMap.RETRY] || ''
         };
 
@@ -515,6 +529,7 @@ const writeJobsCsv = (csvPath, jobs) => {
         job.STATUS,
         job.REMARKS,
         job.FILENAME,
+        job.DETAIL_STRATEGY || '',
         job.RETRY
     ]));
 
@@ -531,7 +546,7 @@ const writeJobsCsv = (csvPath, jobs) => {
  * @param {string} filename - Filename where job was saved (e.g., "elixirr/1.txt")
  * @param {string|number} retry - Retry count
  */
-const updateJobStatus = (csvPath, url, status, remarks, filename, retry) => {
+const updateJobStatus = (csvPath, url, status, remarks, filename, retry, detailStrategy) => {
     const jobs = readJobsCsv(csvPath);
 
     const jobIndex = jobs.findIndex(job => job.URL === url);
@@ -540,6 +555,9 @@ const updateJobStatus = (csvPath, url, status, remarks, filename, retry) => {
         jobs[jobIndex].REMARKS = remarks;
         jobs[jobIndex].FILENAME = filename;
         jobs[jobIndex].RETRY = String(retry);
+        if (detailStrategy !== undefined) {
+            jobs[jobIndex].DETAIL_STRATEGY = detailStrategy;
+        }
     }
 
     writeJobsCsv(csvPath, jobs);

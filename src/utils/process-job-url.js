@@ -60,11 +60,16 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
     const maxRetries = process.env.MAX_RETRIES || 3;
     let lastError = null;
     const companyName = extractCompanyName(url);
+    let detailStrategy = 'unknown';
+    let providerDiagnostics = null;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         const pageController = createPageController(browser);
-        let detailStrategy = 'unknown';
         let usedProviderExtractor = false;
+        const attemptNumber = attempt + 1;
+
+        providerDiagnostics = null;
+        detailStrategy = 'unknown';
 
         try {
             let jobData = null;
@@ -83,9 +88,21 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
                     });
 
                     if (providerResult) {
-                        jobData = providerResult;
-                        usedProviderExtractor = true;
-                        detailStrategy = providerResult.strategy || `${resolvedProviderId}-provider`;
+                        const candidateJob = providerResult.job || providerResult;
+                        if (providerResult.diagnostics) {
+                            providerDiagnostics = {
+                                attempt: attemptNumber,
+                                ...providerResult.diagnostics
+                            };
+                        }
+
+                        if (candidateJob) {
+                            jobData = candidateJob;
+                            usedProviderExtractor = true;
+                            detailStrategy = providerResult.strategy || candidateJob.strategy || `${resolvedProviderId}-provider`;
+                        } else if (providerResult.strategy) {
+                            detailStrategy = providerResult.strategy;
+                        }
                     }
                 } catch (providerError) {
                     log.warn(`Provider ${resolvedProviderId} fetchJobDetail failed for ${url}: ${providerError.message}`);
@@ -99,6 +116,11 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
                 const fallbackPage = await pageController.ensurePage();
                 jobData = await extractJobDetails(fallbackPage, url);
                 detailStrategy = jobData && jobData.source ? jobData.source : 'generic';
+                providerDiagnostics = {
+                    attempt: attemptNumber,
+                    ...(providerDiagnostics || {}),
+                    fallbackStrategy: 'generic-extractor'
+                };
             }
 
             if (provider && typeof provider.postProcessJobDetail === 'function' && jobData) {
@@ -140,7 +162,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
 
             if (jobsCsvPath) {
                 const fileNamePath = `${companyName}/${fileName}`;
-                updateJobStatus(jobsCsvPath, url, 'done', '', fileNamePath, currentRetryCount);
+                updateJobStatus(jobsCsvPath, url, 'done', '', fileNamePath, currentRetryCount, detailStrategy);
             }
 
             if (detailReport && reportPath) {
@@ -154,7 +176,8 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
                 detailReport.detail_extraction_report[companyName].passedUrls.push({
                     url,
                     provider: resolvedProviderId,
-                    strategy: detailStrategy
+                    strategy: detailStrategy,
+                    diagnostics: providerDiagnostics || undefined
                 });
 
                 saveDetailReport(reportPath, detailReport);
@@ -294,7 +317,7 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
 
         if (jobsCsvPath) {
             const newRetryCount = currentRetryCount + 1;
-            updateJobStatus(jobsCsvPath, url, 'failed', reason, '', newRetryCount);
+            updateJobStatus(jobsCsvPath, url, 'failed', reason, '', newRetryCount, detailStrategy);
         }
 
         if (detailReport && reportPath) {
@@ -308,7 +331,9 @@ const processJobURL = async (browser, url, index, total, jobsDir, stats, opts = 
             detailReport.detail_extraction_report[companyName].failedUrls.push({
                 url,
                 provider: resolvedProviderId,
-                reason: reason
+                reason: reason,
+                strategy: detailStrategy,
+                diagnostics: providerDiagnostics || undefined
             });
 
             saveDetailReport(reportPath, detailReport);
