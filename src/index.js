@@ -72,8 +72,8 @@ const parseArgs = () => {
                 process.exit(1);
             }
         } else {
-            const stage1Id = await runStage1({ requestId, provider, searchEngine, search, clean });
-            const stage2Id = await runStage2({ requestId: stage1Id, clean });
+            const stage1Id = await runStage1({ requestId, provider, searchEngine, pages, search, clean });
+            const stage2Id = await runStage2({ runId: stage1Id, clean });
             await runStage3({ runId: stage2Id, force });
         }
 
