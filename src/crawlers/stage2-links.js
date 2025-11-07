@@ -3,10 +3,8 @@ const fs = require('fs');
 const pLimit = require('p-limit');
 const config = require('../config');
 const log = require('../utils/logger');
-const { extractJobLinks } = require('../utils/job-links');
 const { findProviderByUrl, DEFAULT_PROVIDER_ID } = require('../job-boards');
 const { generateRequestId, setupJobLinksFolder, loadLinkReport, saveLinkReport, readGoogleResultsCsv, writeGoogleResultsCsv, getExistingJobUrls, appendToJobsCsv } = require('../utils/request-helpers');
-const pupBrowser = require('../utils/browser');
 
 const runStage2 = async (options = {}) => {
     log.info('Starting Stage 2: Job Link Extractor...');
@@ -97,14 +95,11 @@ const runStage2 = async (options = {}) => {
         return;
     }
 
-    const browser = await pupBrowser();
-
     const limit = pLimit(config.crawler.concurrency);
     let totalJobLinksExtracted = 0;
     let newJobLinksAdded = 0;
     let duplicatesSkipped = 0;
     let failedExtractions = 0;
-    let successfulExtractions = 0;
 
     const processJobBoardURL = async (rowData, index) => {
         const url = rowData.URL;
@@ -112,24 +107,19 @@ const runStage2 = async (options = {}) => {
         const providerId = provider ? provider.id : DEFAULT_PROVIDER_ID;
 
         log.progress(`Processing job board ${index + 1} of ${urlsNeedingProcessing.length}: ${url} (provider: ${providerId})`);
-        if (!provider) {
-            log.info(`No provider registered for ${url}. Using generic link extractor.`);
-        }
-
-        const page = await browser.newPage();
-        const providerCollects = provider && typeof provider.collectJobLinks === 'function';
 
         try {
-            await page.setUserAgent(config.crawler.userAgent);
-            await page.setViewport({ width: 1920, height: 1080 });
-            await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
+            if (typeof provider.collectJobLinks !== 'function') {
+                const reason = `Provider '${providerId}' does not implement collectJobLinks.`;
+                throw new Error(reason);
+            }
 
             const normalizeLinkUrl = (rawUrl) => {
                 if (!rawUrl) {
                     return rawUrl;
                 }
 
-                if (provider && typeof provider.normalizeJobUrl === 'function') {
+                if (typeof provider.normalizeJobUrl === 'function') {
                     try {
                         return provider.normalizeJobUrl(rawUrl) || rawUrl;
                     } catch (normalizationError) {
@@ -152,11 +142,11 @@ const runStage2 = async (options = {}) => {
 
                 if (typeof value === 'object') {
                     const entryUrl = value.url || value.URL || value.href || '';
-                    const normalizedUrl = normalizeLinkUrl(entryUrl);
                     if (!entryUrl) {
                         return null;
                     }
 
+                    const normalizedUrl = normalizeLinkUrl(entryUrl);
                     return {
                         url: normalizedUrl,
                         providerId: value.providerId || value.provider || value.PROVIDER || providerId
@@ -166,45 +156,35 @@ const runStage2 = async (options = {}) => {
                 return null;
             };
 
-            let collectionStrategy = 'generic';
             let providerDiagnostics = null;
             let extractedEntries = [];
 
-            if (providerCollects) {
-                try {
-                    const providerResult = await provider.collectJobLinks({
-                        page,
-                        url,
-                        logger: log,
-                        requestRow: rowData
-                    });
+            try {
+                const providerResult = await provider.collectJobLinks({
+                    url,
+                    logger: log,
+                    requestRow: rowData
+                });
 
-                    const candidateList = providerResult && (providerResult.jobUrls || providerResult.jobLinks || providerResult.jobs);
-                    if (Array.isArray(candidateList)) {
-                        extractedEntries = candidateList
-                            .map(normalizeJobLinkEntry)
-                            .filter(Boolean);
-                        collectionStrategy = providerResult.strategy || 'provider';
-                        providerDiagnostics = providerResult.diagnostics || null;
-                        log.info(`Provider ${provider.id} returned ${extractedEntries.length} job link(s) via ${collectionStrategy}.`);
-                    }
-                } catch (providerError) {
-                    log.warn(`Provider ${provider.id} collectJobLinks failed for ${url}: ${providerError.message}`);
+                const candidateList = providerResult && (providerResult.jobUrls || providerResult.jobLinks || providerResult.jobs);
+                if (Array.isArray(candidateList)) {
+                    extractedEntries = candidateList
+                        .map(normalizeJobLinkEntry)
+                        .filter(Boolean);
+                    providerDiagnostics = providerResult.diagnostics || null;
+                    log.info(`Provider ${provider.id} returned ${extractedEntries.length} job link(s).`);
                 }
+            } catch (providerError) {
+                log.warn(`Provider ${provider.id} collectJobLinks failed for ${url}: ${providerError.message}`);
+                throw providerError;
             }
 
-            if (!Array.isArray(extractedEntries) || extractedEntries.length === 0) {
-                if (providerCollects) {
-                    log.info(`Provider ${providerId} returned no links. Falling back to generic extractor for ${url}.`);
-                }
-                const fallbackLinks = await extractJobLinks(page, url);
-                extractedEntries = fallbackLinks
-                    .map(normalizeJobLinkEntry)
-                    .filter(Boolean);
-                collectionStrategy = 'generic';
-                if (extractedEntries.length > 0) {
-                    log.info(`Generic extractor recovered ${extractedEntries.length} job link(s) for ${url}.`);
-                }
+            if (!Array.isArray(extractedEntries)) {
+                extractedEntries = [];
+            }
+
+            if (extractedEntries.length === 0) {
+                log.info(`Provider ${providerId} returned no job links.`);
             }
 
             totalJobLinksExtracted += extractedEntries.length;
@@ -228,7 +208,6 @@ const runStage2 = async (options = {}) => {
             report.link_extraction_report[url] = {
                 status: true,
                 provider: providerId,
-                strategy: collectionStrategy,
                 jobLinksFound: extractedEntries.length,
                 newJobLinksAdded: newLinks.length,
                 duplicatesSkipped: extractedEntries.length - newLinks.length,
@@ -246,17 +225,15 @@ const runStage2 = async (options = {}) => {
                 rowToUpdate.JOB_COUNT = String(extractedEntries.length);
                 writeGoogleResultsCsv(googleResultsCsv, googleRows);
             }
-
-            successfulExtractions++;
-
         } catch (error) {
             log.error(`Failed to extract from ${url}: ${error.message}`);
 
             report.link_extraction_report[url] = {
                 status: false,
                 provider: providerId,
-                strategy: providerCollects ? 'provider' : 'generic',
                 jobLinksFound: 0,
+                newJobLinksAdded: 0,
+                duplicatesSkipped: 0,
                 error: error.message
             };
             saveLinkReport(reportPath, report);
@@ -270,9 +247,6 @@ const runStage2 = async (options = {}) => {
             }
 
             failedExtractions++;
-
-        } finally {
-            await page.close();
         }
     };
 
@@ -281,8 +255,6 @@ const runStage2 = async (options = {}) => {
             limit(() => processJobBoardURL(rowData, index))
         )
     );
-
-    await browser.close();
 
     // Final summary
     log.success(`Stage 2 complete for jobId: ${jobId}`);
