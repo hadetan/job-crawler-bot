@@ -472,7 +472,6 @@ async function collectJobLinks({ url, logger }) {
         return {
             providerId: GREENHOUSE_PROVIDER_ID,
             jobUrls: result.jobUrls,
-            strategy: 'greenhouse-api',
             diagnostics: result.diagnostics,
             api: result.api
         };
@@ -606,7 +605,7 @@ async function fetchJobDetail({ url, logger, context }) {
 
     diagnostics.durationMs = diagnostics.durationMs || (Date.now() - startedAt);
 
-    return { job, strategy: 'greenhouse-api', diagnostics };
+    return { job, diagnostics };
 }
 
 module.exports = {

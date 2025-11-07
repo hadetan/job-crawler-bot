@@ -230,7 +230,7 @@ npm start -- --stage=3 --run=nov_03_crawl --id=nov_03_extraction --force
 - **Retry Logic**: Automatically retries failed extractions up to 3 times (configurable via `MAX_RETRY_COUNT`)
 - **Resume Capability**: Skips completed jobs and continues from pending/failed URLs
 - **Force Mode**: Use `--force` to retry only failed URLs, ignoring retry count limits
-- **CSV Status Updates**: Updates Stage 2's jobs.csv with extraction status, resolved file paths, and a `DETAIL_STRATEGY` column for post-run analysis
+- **CSV Status Updates**: Updates Stage 2's jobs.csv with extraction status, resolved file paths
 - **Company Organization**: Jobs saved as `{companyName}/{number}.txt` for easy browsing
 - **Detail Reports**: Tracks passed/failed URLs per company in report.json along with provider diagnostics and chosen strategy
 - **Strategy Telemetry**: CLI summary surfaces per-strategy counts (e.g., `lever-api`, `lever-dom`, `generic`) so you can confirm API coverage at a glance

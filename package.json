@@ -1,7 +1,7 @@
 {
   "name": "job-crawler-bot",
   "version": "1.0.0",
-  "description": "3-stage job crawler using Google Custom Search API and Puppeteer",
+  "description": "3-stage job crawler using Google Custom Search API",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js"
@@ -10,7 +10,6 @@
     "crawler",
     "scraper",
     "jobs",
-    "puppeteer",
     "google-search"
   ],
   "author": "",
@@ -23,7 +22,6 @@
     "dotenv": "^16.3.0",
     "html-to-text": "^9.0.0",
     "p-limit": "^3.1.0",
-    "puppeteer": "^21.0.0",
     "serpapi": "^2.2.1"
   }
 }

@@ -1,4 +1,3 @@
-const config = require('../../config');
 const { normalizeURL } = require('../../utils');
 const { createProviderHttpClient, resolveDescription, collectListText, normalizeWhitespace } = require('../detail-helpers');
 const { mergeFilters, runApiCollector } = require('./api-collector');
@@ -296,162 +295,6 @@ function prepareJobDetail({ url, jobRecord, logger }) {
     return context;
 }
 
-async function ensurePageLoaded(page, url) {
-    await page.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout: config.crawler.pageTimeout
-    });
-}
-
-async function extractJobDataFromDom({ ensurePage, url, logger }) {
-    if (typeof ensurePage !== 'function') {
-        return null;
-    }
-
-    try {
-        const page = await ensurePage();
-        await ensurePageLoaded(page, url);
-
-        return await page.evaluate(() => {
-            const sanitize = (value) => {
-                if (typeof value !== 'string') {
-                    return '';
-                }
-                return value.replace(/\s+/g, ' ').trim();
-            };
-
-            const parsedPayloads = [];
-            document.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
-                const raw = script.textContent || script.innerText || '';
-                if (!raw.trim()) {
-                    return;
-                }
-
-                try {
-                    const json = JSON.parse(raw);
-                    if (Array.isArray(json)) {
-                        json.forEach((item) => parsedPayloads.push(item));
-                    } else {
-                        parsedPayloads.push(json);
-                    }
-                } catch (_) {
-                    // Ignore badly formatted JSON payloads.
-                }
-            });
-
-            const jobPosting = parsedPayloads.find((item) => {
-                if (!item) {
-                    return false;
-                }
-
-                const type = item['@type'];
-                if (Array.isArray(type)) {
-                    return type.some((entry) => String(entry).toLowerCase() === 'jobposting');
-                }
-                if (typeof type === 'string') {
-                    return type.toLowerCase() === 'jobposting';
-                }
-                return false;
-            });
-
-            const descriptionHtmlFromJson = jobPosting && jobPosting.description ? String(jobPosting.description) : '';
-            const descriptionPlainFromJson = sanitize(descriptionHtmlFromJson.replace(/<[^>]+>/g, ' '));
-
-            const descriptionNode =
-                document.querySelector('[data-qa="job-description"], [data-qa="description"]') ||
-                document.querySelector('section.description, section.job-description, article');
-            const descriptionHtmlFromDom = descriptionNode ? descriptionNode.innerHTML : '';
-            const descriptionPlainFromDom = descriptionNode ? sanitize(descriptionNode.textContent || '') : '';
-
-            const titleFromJson = sanitize(jobPosting && (jobPosting.title || jobPosting.name));
-            const titleFromDom = sanitize(
-                (document.querySelector('[data-qa="posting-name"]') || document.querySelector('h1'))?.textContent || ''
-            );
-
-            let location = '';
-            const jobLocation = jobPosting && jobPosting.jobLocation;
-            if (Array.isArray(jobLocation)) {
-                location = sanitize(
-                    jobLocation
-                        .map((loc) => {
-                            if (!loc) {
-                                return '';
-                            }
-                            if (typeof loc === 'string') {
-                                return loc;
-                            }
-
-                            const address = loc.address || loc;
-                            if (typeof address === 'string') {
-                                return address;
-                            }
-
-                            if (address && typeof address === 'object') {
-                                const locality = address.addressLocality || '';
-                                const region = address.addressRegion || '';
-                                const country = address.addressCountry || '';
-                                const remote =
-                                    typeof address['@type'] === 'string' && address['@type'].toLowerCase().includes('virtual');
-                                const summary = [locality, region, country].filter(Boolean).join(', ');
-                                return summary || (remote ? 'Remote' : '');
-                            }
-
-                            return '';
-                        })
-                        .filter(Boolean)
-                        .join(' / ')
-                );
-            } else if (jobLocation && typeof jobLocation === 'object') {
-                const address = jobLocation.address || jobLocation;
-                const locality = address.addressLocality || '';
-                const region = address.addressRegion || '';
-                const country = address.addressCountry || '';
-                const remote = typeof address['@type'] === 'string' && address['@type'].toLowerCase().includes('virtual');
-                location = sanitize([locality, region, country].filter(Boolean).join(', ')) || (remote ? 'Remote' : '');
-            } else if (jobLocation && typeof jobLocation === 'string') {
-                location = sanitize(jobLocation);
-            }
-
-            if (!location) {
-                const domLocation =
-                    document.querySelector('[data-qa="location"]') ||
-                    document.querySelector('.location, .posting-address');
-                location = sanitize(domLocation ? domLocation.textContent || '' : '');
-            }
-
-            const skillSelectors = [
-                '[data-qa="job-description"] ul li',
-                '[data-qa="description"] ul li',
-                'section ul li',
-                '.content ul li',
-                'article ul li'
-            ];
-            const skills = new Set();
-            skillSelectors.forEach((selector) => {
-                document.querySelectorAll(selector).forEach((item) => {
-                    const text = sanitize(item.textContent || '');
-                    if (text && text.length <= 120) {
-                        skills.add(text);
-                    }
-                });
-            });
-
-            return {
-                title: titleFromJson || titleFromDom || '',
-                descriptionHtml: descriptionHtmlFromJson || descriptionHtmlFromDom || '',
-                descriptionPlain: descriptionPlainFromJson || descriptionPlainFromDom || '',
-                location: location || '',
-                skills: Array.from(skills)
-            };
-        });
-    } catch (error) {
-        if (logger) {
-            logger.warn(`Lever DOM extraction failed for ${url}: ${error.message}`);
-        }
-        return null;
-    }
-}
-
 const matchesUrl = (url) => {
     if (!url) {
         return false;
@@ -654,7 +497,6 @@ async function collectJobLinks({ url, logger }) {
         return {
             providerId: LEVER_PROVIDER_ID,
             jobUrls: result.jobUrls,
-            strategy: 'lever-api',
             diagnostics: result.diagnostics,
             api: result.api
         };
@@ -675,7 +517,7 @@ async function collectJobLinks({ url, logger }) {
     throw error;
 }
 
-async function fetchJobDetail({ url, logger, context, ensurePage }) {
+async function fetchJobDetail({ url, logger, context }) {
     const derivedContext = context && (context.companySlug || context.postingId)
         ? context
         : parseLeverContextFromUrl(url);
@@ -760,45 +602,6 @@ async function fetchJobDetail({ url, logger, context, ensurePage }) {
         }
     }
 
-    if (!job) {
-        const domPayload = await extractJobDataFromDom({ ensurePage, url, logger });
-
-        if (domPayload) {
-            const fallbackTitle = normalizeWhitespace(domPayload.title || '');
-            const fallbackDescription = resolveDescription({
-                plainText: domPayload.descriptionPlain || '',
-                html: domPayload.descriptionHtml || ''
-            });
-            const fallbackLocation = normalizeWhitespace(domPayload.location || '') || 'Remote / Multiple';
-            const fallbackSkills = Array.from(
-                new Set((domPayload.skills || []).map(normalizeWhitespace).filter(Boolean))
-            );
-
-            if (fallbackTitle && fallbackDescription && fallbackDescription.length >= 30) {
-                job = {
-                    url,
-                    title: fallbackTitle,
-                    location: fallbackLocation,
-                    description: fallbackDescription,
-                    skills: fallbackSkills,
-                    source: 'lever-dom',
-                    rawMeta: {
-                        fallback: 'dom-jsonld'
-                    }
-                };
-
-                strategy = 'lever-dom';
-                diagnostics.fallback = 'dom-jsonld';
-                diagnostics.descriptionLength = fallbackDescription.length;
-                diagnostics.skillCount = fallbackSkills.length;
-            } else if (!diagnostics.error) {
-                diagnostics.error = 'fallback-insufficient';
-            }
-        } else if (!diagnostics.error) {
-            diagnostics.error = 'fallback-missing';
-        }
-    }
-
     diagnostics.durationMs = diagnostics.durationMs || (Date.now() - startedAt);
 
     return { job, strategy, diagnostics };
@@ -811,6 +614,4 @@ module.exports = {
     collectJobLinks,
     prepareJobDetail,
     fetchJobDetail,
-    usesBrowser: true,
-    collectsLinksWithBrowser: false
 };

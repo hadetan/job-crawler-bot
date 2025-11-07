@@ -6,7 +6,6 @@ const log = require('../utils/logger');
 const { generateRequestId, setupJobsFolder, readJobsCsv, loadDetailReport } = require('../utils/request-helpers');
 const { DEFAULT_PROVIDER_ID } = require('../job-boards');
 const processJobURL = require('../utils/process-job-url');
-const pupBrowser = require('../utils/browser');
 
 const runStage3 = async (options = {}) => {
     log.info('Starting Stage 3: Job Details Extractor...');
@@ -104,8 +103,6 @@ const runStage3 = async (options = {}) => {
 
     const detailReport = loadDetailReport(reportPath);
 
-    const browser = await pupBrowser();
-
     const stats = {
         successCount: 0,
         failedCount: 0,
@@ -118,7 +115,6 @@ const runStage3 = async (options = {}) => {
     await Promise.all(
         urlsToProcess.map((job, index) =>
             limit(() => processJobURL(
-                browser,
                 job.URL,
                 index,
                 urlsToProcess.length,
@@ -135,8 +131,6 @@ const runStage3 = async (options = {}) => {
             ))
         )
     );
-
-    await browser.close();
 
     // Log summary
     log.success(`Stage 3 complete: ${stats.successCount} jobs saved to ${jobsDir}`);
