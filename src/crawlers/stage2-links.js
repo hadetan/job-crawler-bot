@@ -157,6 +157,7 @@ const runStage2 = async (options = {}) => {
             };
 
             let providerDiagnostics = null;
+            let providerApiEndpoint = null;
             let extractedEntries = [];
 
             try {
@@ -172,6 +173,7 @@ const runStage2 = async (options = {}) => {
                         .map(normalizeJobLinkEntry)
                         .filter(Boolean);
                     providerDiagnostics = providerResult.diagnostics || null;
+                    providerApiEndpoint = providerResult.api || null;
                     log.info(`Provider ${provider.id} returned ${extractedEntries.length} job link(s).`);
                 }
             } catch (providerError) {
@@ -211,7 +213,8 @@ const runStage2 = async (options = {}) => {
                 jobLinksFound: extractedEntries.length,
                 newJobLinksAdded: newLinks.length,
                 duplicatesSkipped: extractedEntries.length - newLinks.length,
-                error: null
+                error: null,
+                api: providerApiEndpoint
             };
             if (providerDiagnostics) {
                 report.link_extraction_report[url].diagnostics = providerDiagnostics;
@@ -234,7 +237,8 @@ const runStage2 = async (options = {}) => {
                 jobLinksFound: 0,
                 newJobLinksAdded: 0,
                 duplicatesSkipped: 0,
-                error: error.message
+                error: error.message,
+                api: null
             };
             saveLinkReport(reportPath, report);
 

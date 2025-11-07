@@ -496,6 +496,8 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
         }
     });
 
+    const baseApiUrl = `${LEVER_API_BASE}/${companySlug}`;
+
     let skip = 0;
     let safetyCounter = 0;
     const jobUrls = [];
@@ -503,7 +505,6 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
     const diagnostics = { pages: 0, totalPostings: 0, companySlug, filters };
 
     while (safetyCounter < 20) {
-        const apiUrl = `${LEVER_API_BASE}/${companySlug}`;
         const query = new URLSearchParams(params.toString());
         if (skip > 0) {
             query.set('skip', String(skip));
@@ -511,7 +512,7 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
 
         let response;
         try {
-            response = await httpClient.get(apiUrl, {
+            response = await httpClient.get(baseApiUrl, {
                 params: Object.fromEntries(query.entries()),
             });
         } catch (error) {
@@ -555,7 +556,8 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
 
     return {
         jobUrls,
-        diagnostics
+        diagnostics,
+        api: baseApiUrl
     };
 };
 
@@ -608,7 +610,8 @@ async function collectJobLinks({ url, logger }) {
 
         return {
             jobUrls: response.jobUrls,
-            diagnostics: response.diagnostics
+            diagnostics: response.diagnostics,
+            api: response.api
         };
     };
 
@@ -652,7 +655,8 @@ async function collectJobLinks({ url, logger }) {
             providerId: LEVER_PROVIDER_ID,
             jobUrls: result.jobUrls,
             strategy: 'lever-api',
-            diagnostics: result.diagnostics
+            diagnostics: result.diagnostics,
+            api: result.api
         };
     }
 

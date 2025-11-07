@@ -135,7 +135,8 @@ async function runApiCollector({
             return {
                 success: true,
                 jobUrls,
-                diagnostics
+                diagnostics,
+                api: result.api !== undefined ? result.api : null
             };
         } catch (error) {
             lastError = error;
