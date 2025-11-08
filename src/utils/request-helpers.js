@@ -419,7 +419,7 @@ const getExistingJobUrls = (csvPath) => {
 /**
  * Append job links to jobs.csv
  * @param {string} csvPath - Path to jobs.csv
- * @param {Array<string|{url: string, providerId?: string}>} jobEntries - Links or objects to append
+ * @param {Array<string|{url: string, providerId?: string, metadata?: object, remarks?: string, status?: string, filename?: string, retry?: number|string}>} jobEntries - Links or objects to append
  * @param {string} [defaultProviderId]
  */
 const appendToJobsCsv = (csvPath, jobEntries, defaultProviderId = DEFAULT_PROVIDER_ID) => {
@@ -436,10 +436,54 @@ const appendToJobsCsv = (csvPath, jobEntries, defaultProviderId = DEFAULT_PROVID
 
             let url = entry;
             let providerId = defaultProviderId;
+            let status = 'pending';
+            let remarks = '';
+            let filename = '';
+            let retryCount = '0';
 
             if (typeof entry === 'object') {
                 url = entry.url || entry.URL || entry.href || '';
                 providerId = entry.providerId || entry.provider || entry.PROVIDER || defaultProviderId;
+
+                if (typeof entry.status === 'string' && entry.status.trim()) {
+                    status = entry.status.trim();
+                }
+
+                if (typeof entry.filename === 'string') {
+                    filename = entry.filename;
+                }
+
+                if (entry.retry !== undefined && entry.retry !== null && !Number.isNaN(Number(entry.retry))) {
+                    retryCount = String(entry.retry);
+                }
+
+                if (typeof entry.remarks === 'string') {
+                    remarks = entry.remarks;
+                }
+
+                if (!remarks && entry.metadata && typeof entry.metadata === 'object') {
+                    const metadata = Object.entries(entry.metadata)
+                        .reduce((acc, [key, value]) => {
+                            if (value === undefined || value === null) {
+                                return acc;
+                            }
+
+                            if (typeof value === 'object' && Object.keys(value).length === 0) {
+                                return acc;
+                            }
+
+                            acc[key] = value;
+                            return acc;
+                        }, {});
+
+                    if (Object.keys(metadata).length > 0) {
+                        try {
+                            remarks = JSON.stringify(metadata);
+                        } catch (_) {
+                            remarks = '';
+                        }
+                    }
+                }
             }
 
             if (!url) {
@@ -449,10 +493,10 @@ const appendToJobsCsv = (csvPath, jobEntries, defaultProviderId = DEFAULT_PROVID
             return formatCsvLine([
                 url,
                 providerId || defaultProviderId,
-                'pending',
-                '',
-                '',
-                '0'
+                status,
+                remarks,
+                filename,
+                retryCount
             ]);
         })
         .filter(Boolean);

@@ -306,11 +306,12 @@ function extractSkillsFromHtml(html) {
 
 async function fetchListingsFromApi({ boardToken, filters }) {
     if (!boardToken) {
-        return { jobUrls: [], diagnostics: { error: 'missing-board-token' } };
+        return { jobUrls: [], jobEntries: [], diagnostics: { error: 'missing-board-token' } };
     }
 
     const dedupe = new Set();
     const jobUrls = [];
+    const jobEntries = [];
     const diagnostics = { boardToken, filters: { ...(filters || {}) }, pages: 0, totalJobs: 0 };
     let page = 1;
 
@@ -370,6 +371,27 @@ async function fetchListingsFromApi({ boardToken, filters }) {
                 if (!dedupe.has(dedupeKey)) {
                     dedupe.add(dedupeKey);
                     jobUrls.push(canonical);
+
+                    const entryMetadata = {};
+                    if (boardToken) {
+                        entryMetadata.boardToken = boardToken;
+                    }
+
+                    if (job.id !== undefined && job.id !== null) {
+                        entryMetadata.jobId = String(job.id);
+                    }
+
+                    const filterKeys = Object.keys(filters || {}).filter((key) => filters[key]);
+                    if (filterKeys.length > 0) {
+                        entryMetadata.filters = filterKeys.reduce((acc, key) => {
+                            acc[key] = filters[key];
+                            return acc;
+                        }, {});
+                    }
+
+                    jobEntries.push(Object.keys(entryMetadata).length > 0
+                        ? { url: canonical, metadata: entryMetadata }
+                        : { url: canonical });
                     break;
                 }
             }
@@ -384,7 +406,7 @@ async function fetchListingsFromApi({ boardToken, filters }) {
         page += 1;
     }
 
-    return { jobUrls, diagnostics, api: baseApiUrl };
+    return { jobUrls, jobEntries, diagnostics, api: baseApiUrl };
 }
 
 async function collectJobLinks({ url, logger }) {
@@ -430,6 +452,7 @@ async function collectJobLinks({ url, logger }) {
         const result = await fetchListingsFromApi({ boardToken, filters });
         return {
             jobUrls: result.jobUrls,
+            jobEntries: result.jobEntries,
             diagnostics: result.diagnostics,
             api: result.api
         };
@@ -472,6 +495,7 @@ async function collectJobLinks({ url, logger }) {
         return {
             providerId: GREENHOUSE_PROVIDER_ID,
             jobUrls: result.jobUrls,
+            jobEntries: result.jobEntries,
             diagnostics: result.diagnostics,
             api: result.api
         };
@@ -538,18 +562,61 @@ async function fetchJobDetail({ url, logger, context }) {
         ? context
         : parseGreenhouseContextFromUrl(url);
 
-    const boardToken = derivedContext ? derivedContext.boardToken : null;
+    let boardToken = derivedContext ? derivedContext.boardToken : null;
     const jobId = derivedContext ? derivedContext.jobId : null;
-    const endpoint = derivedContext && derivedContext.endpoint
+    let endpoint = derivedContext && derivedContext.endpoint
         ? derivedContext.endpoint
         : (boardToken && jobId ? `${GREENHOUSE_API_BASE}/${boardToken}/jobs/${jobId}` : null);
+    let filters = derivedContext && derivedContext.filters ? { ...derivedContext.filters } : undefined;
 
     const diagnostics = {
         boardToken: boardToken || null,
         jobId: jobId || null,
         endpoint: endpoint || undefined,
-        filters: derivedContext && derivedContext.filters ? derivedContext.filters : undefined
+        filters
     };
+
+    const ensureEndpoint = async () => {
+        if (endpoint) {
+            return endpoint;
+        }
+
+        if (!jobId) {
+            return null;
+        }
+
+        if (!boardToken) {
+            const discovery = await discoverBoardTokenFromHtml({ url, logger });
+            if (discovery.boardToken) {
+                boardToken = discovery.boardToken;
+                diagnostics.boardToken = boardToken;
+                const mergedFilters = mergeFilters(filters || {}, discovery.filters || {});
+                const hasMergedFilters = Object.keys(mergedFilters).length > 0;
+                filters = hasMergedFilters ? mergedFilters : undefined;
+                diagnostics.filters = filters;
+
+                if (derivedContext) {
+                    derivedContext.boardToken = boardToken;
+                    derivedContext.filters = filters;
+                }
+            }
+        }
+
+        if (boardToken && jobId) {
+            endpoint = `${GREENHOUSE_API_BASE}/${boardToken}/jobs/${jobId}`;
+            diagnostics.endpoint = endpoint;
+            if (derivedContext) {
+                derivedContext.endpoint = endpoint;
+            }
+        }
+
+        return endpoint;
+    };
+
+    endpoint = await ensureEndpoint();
+    diagnostics.endpoint = endpoint || diagnostics.endpoint;
+    diagnostics.boardToken = boardToken || diagnostics.boardToken;
+    diagnostics.filters = filters;
 
     const startedAt = Date.now();
     let job = null;

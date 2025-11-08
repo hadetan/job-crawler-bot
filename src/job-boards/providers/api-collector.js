@@ -130,11 +130,52 @@ async function runApiCollector({
             const rawJobUrls = Array.isArray(result.jobUrls) ? result.jobUrls : [];
             const jobUrls = rawJobUrls.map((entry) => normalizeUrl(entry));
 
+            const rawJobEntries = Array.isArray(result.jobEntries) ? result.jobEntries : null;
+            const jobEntries = rawJobEntries
+                ? rawJobEntries
+                    .map((entry) => {
+                        if (entry === null || entry === undefined) {
+                            return null;
+                        }
+
+                        if (typeof entry === 'string') {
+                            return { url: normalizeUrl(entry) };
+                        }
+
+                        if (typeof entry === 'object') {
+                            const cloned = { ...entry };
+                            const rawUrl = entry.url || entry.URL || entry.href;
+                            if (!rawUrl) {
+                                return null;
+                            }
+
+                            cloned.url = normalizeUrl(rawUrl);
+                            if (entry.providerId && !cloned.providerId) {
+                                cloned.providerId = entry.providerId;
+                            }
+
+                            if (entry.provider && !cloned.providerId) {
+                                cloned.providerId = entry.provider;
+                            }
+
+                            if (entry.PROVIDER && !cloned.providerId) {
+                                cloned.providerId = entry.PROVIDER;
+                            }
+
+                            return cloned;
+                        }
+
+                        return null;
+                    })
+                    .filter(Boolean)
+                : null;
+
             const diagnostics = mergeDiagnostics(attemptRecord.diagnostics, result.diagnostics || {}, attempts);
 
             return {
                 success: true,
                 jobUrls,
+                jobEntries,
                 diagnostics,
                 api: result.api !== undefined ? result.api : null
             };

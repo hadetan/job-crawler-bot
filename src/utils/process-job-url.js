@@ -106,13 +106,27 @@ const processJobURL = async (url, index, total, jobsDir, stats, opts = {}) => {
                 });
 
                 if (providerResult) {
-                    const candidateJob = providerResult.job || providerResult;
                     if (providerResult.diagnostics) {
                         providerDiagnostics = {
                             attempt: attemptNumber,
                             ...providerResult.diagnostics
                         };
                     }
+
+                    const candidateJob = (() => {
+                        if (providerResult.job) {
+                            return providerResult.job;
+                        }
+
+                        if (providerResult && typeof providerResult === 'object' && !providerResult.job) {
+                            const { title, description } = providerResult;
+                            if (title && description) {
+                                return providerResult;
+                            }
+                        }
+
+                        return null;
+                    })();
 
                     if (candidateJob) {
                         jobData = candidateJob;
@@ -125,6 +139,17 @@ const processJobURL = async (url, index, total, jobsDir, stats, opts = {}) => {
                 providerDiagnostics.status = providerDiagnostics.status || providerError.status || providerError.code;
                 log.warn(`Provider ${resolvedProviderId} fetchJobDetail failed for ${url}: ${providerError.message}`);
                 throw providerError;
+            }
+
+            const diagnosticStatus = providerDiagnostics && providerDiagnostics.status;
+            if (typeof diagnosticStatus === 'number' && (diagnosticStatus < 200 || diagnosticStatus >= 300)) {
+                const statusErrorMessage = (providerDiagnostics && providerDiagnostics.error)
+                    ? providerDiagnostics.error
+                    : `Unexpected status ${diagnosticStatus}`;
+                const statusError = new Error(statusErrorMessage);
+                statusError.providerDiagnostics = providerDiagnostics;
+                statusError.nonRetryable = diagnosticStatus >= 400 && diagnosticStatus < 500;
+                throw statusError;
             }
 
             if (!jobData) {
@@ -244,7 +269,23 @@ const processJobURL = async (url, index, total, jobsDir, stats, opts = {}) => {
 
     if (jobsCsvPath) {
         const newRetryCount = currentRetryCount + 1;
-        updateJobStatus(jobsCsvPath, url, 'failed', failureReason, '', newRetryCount);
+        let remarksPayload = failureReason;
+
+        if (jobRecord && typeof jobRecord.REMARKS === 'string') {
+            const trimmed = jobRecord.REMARKS.trim();
+            if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (parsed && typeof parsed === 'object') {
+                        remarksPayload = JSON.stringify({ ...parsed, error: failureReason });
+                    }
+                } catch (_) {
+                    // ignore parse failures and use fallback string remarks
+                }
+            }
+        }
+
+        updateJobStatus(jobsCsvPath, url, 'failed', remarksPayload, '', newRetryCount);
     }
 
     if (detailReport && reportPath) {

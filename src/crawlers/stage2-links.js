@@ -147,9 +147,13 @@ const runStage2 = async (options = {}) => {
                     }
 
                     const normalizedUrl = normalizeLinkUrl(entryUrl);
+                    const metadata = (value.metadata && typeof value.metadata === 'object') ? { ...value.metadata } : null;
+                    const remarks = typeof value.remarks === 'string' ? value.remarks : null;
                     return {
                         url: normalizedUrl,
-                        providerId: value.providerId || value.provider || value.PROVIDER || providerId
+                        providerId: value.providerId || value.provider || value.PROVIDER || providerId,
+                        metadata,
+                        remarks
                     };
                 }
 
@@ -167,7 +171,7 @@ const runStage2 = async (options = {}) => {
                     requestRow: rowData
                 });
 
-                const candidateList = providerResult && (providerResult.jobUrls || providerResult.jobLinks || providerResult.jobs);
+                const candidateList = providerResult && (providerResult.jobEntries || providerResult.jobUrls || providerResult.jobLinks || providerResult.jobs);
                 if (Array.isArray(candidateList)) {
                     extractedEntries = candidateList
                         .map(normalizeJobLinkEntry)
