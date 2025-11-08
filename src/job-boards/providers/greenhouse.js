@@ -1,5 +1,5 @@
 const { normalizeURL } = require('../../utils');
-const { createProviderHttpClient, resolveDescription, normalizeWhitespace, stripHtml } = require('../detail-helpers');
+const { createProviderHttpClient, normalizeWhitespace, convertHtmlToText, normalizeLineBreaks, stripHtml, validateRequiredFields } = require('../detail-helpers');
 const { mergeFilters, runApiCollector } = require('./api-collector');
 
 const GREENHOUSE_PROVIDER_ID = 'greenhouse';
@@ -285,23 +285,37 @@ function decodeHtmlEntities(value) {
         .replace(/&#39;/g, "'");
 }
 
-function extractSkillsFromHtml(html) {
-    if (!html) {
-        return [];
+function buildDescription(data) {
+    if (!data) {
+        return '';
     }
 
-    const normalized = decodeHtmlEntities(html);
-    const matches = normalized.match(/<li[^>]*>(.*?)<\/li>/gis) || [];
-    const skills = new Set();
-
-    matches.forEach((entry) => {
-        const text = normalizeWhitespace(stripHtml(entry));
-        if (text && text.length <= 160) {
-            skills.add(text);
+    const rawHtmlSource = (() => {
+        if (typeof data.content === 'string' && data.content.trim()) {
+            return decodeHtmlEntities(data.content);
         }
-    });
+        if (typeof data.content_html === 'string' && data.content_html.trim()) {
+            return decodeHtmlEntities(data.content_html);
+        }
+        return '';
+    })();
 
-    return Array.from(skills);
+    let description = convertHtmlToText(rawHtmlSource);
+
+    if (!description && rawHtmlSource) {
+        description = normalizeLineBreaks(stripHtml(rawHtmlSource));
+    }
+
+    if (!description) {
+        const plain = typeof data.content_plain === 'string'
+            ? data.content_plain
+            : (typeof data.content_plain_text === 'string' ? data.content_plain_text : '');
+        if (plain) {
+            description = normalizeLineBreaks(plain);
+        }
+    }
+
+    return description || '';
 }
 
 async function fetchListingsFromApi({ boardToken, filters }) {
@@ -630,34 +644,34 @@ async function fetchJobDetail({ url, logger, context }) {
             diagnostics.durationMs = Date.now() - startedAt;
 
             const data = response.data || {};
-            const rawHtml = decodeHtmlEntities(data.content || '');
             const title = normalizeWhitespace(data.title || data.name || '');
             const location = normalizeWhitespace((data.location && data.location.name) || data.location || 'Remote / Multiple') || 'Remote / Multiple';
-            const description = resolveDescription({ html: rawHtml });
-            const skills = extractSkillsFromHtml(data.content || '');
+            const description = buildDescription(data);
 
-            if (title && description && description.length >= 50) {
-                job = {
-                    url,
-                    title,
-                    location,
-                    description,
-                    skills,
-                    source: 'greenhouse-api',
-                    rawMeta: {
-                        absoluteUrl: data.absolute_url || null,
-                        hostedUrl: data.hosted_url || null,
-                        internalJobId: data.internal_job_id || null,
-                        employmentType: data.employment_type || null,
-                        departments: Array.isArray(data.departments) ? data.departments.map((dept) => dept && dept.name).filter(Boolean) : undefined,
-                        offices: Array.isArray(data.offices) ? data.offices.map((office) => office && office.name).filter(Boolean) : undefined
-                    }
-                };
+            const jobCandidate = {
+                url,
+                title,
+                location,
+                description,
+                source: 'greenhouse-api',
+                rawMeta: {
+                    absoluteUrl: data.absolute_url || null,
+                    hostedUrl: data.hosted_url || null,
+                    internalJobId: data.internal_job_id || null,
+                    employmentType: data.employment_type || null,
+                    departments: Array.isArray(data.departments) ? data.departments.map((dept) => dept && dept.name).filter(Boolean) : undefined,
+                    offices: Array.isArray(data.offices) ? data.offices.map((office) => office && office.name).filter(Boolean) : undefined
+                }
+            };
 
-                diagnostics.descriptionLength = job.description.length;
-                diagnostics.skillCount = job.skills.length;
+            const validation = validateRequiredFields(jobCandidate, ['title', 'location', 'description']);
+
+            if (!validation.isValid) {
+                diagnostics.error = 'fields-empty';
+                diagnostics.missingFields = validation.missing;
             } else {
-                diagnostics.error = 'insufficient-content';
+                job = jobCandidate;
+                diagnostics.descriptionLength = job.description.length;
             }
         } catch (error) {
             diagnostics.error = error.message;

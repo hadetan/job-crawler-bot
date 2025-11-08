@@ -1,5 +1,5 @@
 const { normalizeURL } = require('../../utils');
-const { createProviderHttpClient, resolveDescription, collectListText, normalizeWhitespace } = require('../detail-helpers');
+const { createProviderHttpClient, normalizeWhitespace, convertHtmlToText, normalizeLineBreaks, stripHtml, validateRequiredFields } = require('../detail-helpers');
 const { mergeFilters, runApiCollector } = require('./api-collector');
 
 const LEVER_PROVIDER_ID = 'lever';
@@ -517,6 +517,88 @@ async function collectJobLinks({ url, logger }) {
     throw error;
 }
 
+const buildDescription = (data) => {
+    if (!data) {
+        return '';
+    }
+
+    const html = typeof data.description === 'string' ? data.description : '';
+    const plainFallback = typeof data.descriptionPlain === 'string'
+        ? data.descriptionPlain
+        : (typeof data.descriptionText === 'string' ? data.descriptionText : '');
+
+    let description = convertHtmlToText(html);
+
+    if (!description && plainFallback) {
+        description = normalizeLineBreaks(plainFallback);
+    }
+
+    if (!description && html) {
+        description = normalizeLineBreaks(stripHtml(html));
+    }
+
+    return description || '';
+};
+
+const buildSections = (data, primaryDescription = '') => {
+    if (!data) {
+        return [];
+    }
+
+    const sections = [];
+
+    const appendSection = (title, htmlValue) => {
+        if (!htmlValue) {
+            return;
+        }
+
+        const raw = typeof htmlValue === 'string' ? htmlValue.trim() : '';
+        if (!raw) {
+            return;
+        }
+
+        let content = convertHtmlToText(raw);
+        if (!content) {
+            content = normalizeLineBreaks(stripHtml(raw));
+        }
+
+        if (!content) {
+            return;
+        }
+
+        const normalizedPrimary = typeof primaryDescription === 'string' ? primaryDescription.trim() : '';
+        const normalizedContent = content.trim();
+
+        if (normalizedPrimary && normalizedContent === normalizedPrimary) {
+            return;
+        }
+
+        sections.push({
+            title: title || 'Additional Details',
+            content: normalizedContent
+        });
+    };
+
+    appendSection('Opening', data.opening || data.openingBody || data.openingHtml);
+    appendSection('Description Body', data.descriptionBody || data.descriptionBodyHtml);
+
+    if (Array.isArray(data.lists)) {
+        data.lists.forEach((entry, index) => {
+            if (!entry) {
+                return;
+            }
+
+            const heading = typeof entry.text === 'string' && entry.text.trim()
+                ? entry.text.trim()
+                : `Section ${index + 1}`;
+
+            appendSection(heading, entry.content || entry.html || entry.body);
+        });
+    }
+
+    return sections;
+};
+
 async function fetchJobDetail({ url, logger, context }) {
     const derivedContext = context && (context.companySlug || context.postingId)
         ? context
@@ -557,36 +639,42 @@ async function fetchJobDetail({ url, logger, context }) {
                     'Remote / Multiple'
                 ) || 'Remote / Multiple';
 
-                const description = resolveDescription({
-                    plainText: data.descriptionPlain || data.descriptionText || '',
-                    html: data.description || ''
-                });
-
+                const description = buildDescription(data);
                 const title = normalizeWhitespace(data.text || data.title || '');
 
-                if (title && title.length >= 3 && description && description.length >= 50) {
-                    const skills = collectListText(Array.isArray(data.lists) ? data.lists : []);
+                const sections = buildSections(data, description);
+                const hasSections = Array.isArray(sections) && sections.length > 0;
 
-                    job = {
-                        url,
-                        title,
-                        location,
-                        description,
-                        skills,
-                        source: 'lever-api',
-                        rawMeta: {
-                            commitment: categories.commitment || (data.additional && data.additional.commitment) || null,
-                            team: categories.team || (data.additional && data.additional.team) || null,
-                            department: categories.department || null,
-                            level: categories.levels || null,
-                            workplaceType: categories.workType || null
-                        }
-                    };
+                const jobCandidate = {
+                    url,
+                    title,
+                    location,
+                    description,
+                    source: 'lever-api',
+                    rawMeta: {
+                        commitment: categories.commitment || (data.additional && data.additional.commitment) || null,
+                        team: categories.team || (data.additional && data.additional.team) || null,
+                        department: categories.department || null,
+                        level: categories.levels || null,
+                        workplaceType: categories.workType || null
+                    }
+                };
 
-                    diagnostics.skillCount = job.skills.length;
-                    diagnostics.descriptionLength = job.description.length;
+                if (hasSections) {
+                    jobCandidate.sections = sections;
+                }
+
+                const validation = validateRequiredFields(jobCandidate, ['title']);
+
+                if (!validation.isValid) {
+                    diagnostics.error = 'fields-empty';
+                    diagnostics.missingFields = validation.missing;
                 } else {
-                    diagnostics.error = 'insufficient-content';
+                    job = jobCandidate;
+                    diagnostics.descriptionLength = job.description.length;
+                    if (hasSections) {
+                        diagnostics.sectionCount = sections.length;
+                    }
                 }
             } else {
                 diagnostics.error = 'empty-response';

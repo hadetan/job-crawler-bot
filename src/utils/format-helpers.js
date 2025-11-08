@@ -17,6 +17,12 @@ const formatJobToText = (jobData) => {
     lines.push(`TITLE: ${jobData.title}`);
     lines.push('');
 
+    if (jobData.rawMeta && Array.isArray(jobData.rawMeta.departments) && jobData.rawMeta.departments.length > 0) {
+        const dept = jobData.rawMeta.departments.join('; ');
+        lines.push(`DEPARTMENTS: ${dept}`);
+        lines.push('');
+    }
+
     lines.push(`LOCATION: ${jobData.location}`);
     lines.push('');
 
@@ -37,6 +43,29 @@ const formatJobToText = (jobData) => {
     lines.push('');
     lines.push(jobData.description);
     lines.push('');
+
+    if (Array.isArray(jobData.sections) && jobData.sections.length > 0) {
+        lines.push('-'.repeat(80));
+        lines.push('ADDITIONAL DETAILS:');
+        lines.push('-'.repeat(80));
+        lines.push('');
+
+        jobData.sections.forEach((section, index) => {
+            if (!section) {
+                return;
+            }
+
+            const heading = section.title || `Section ${index + 1}`;
+            lines.push(heading);
+            lines.push('-'.repeat(Math.min(heading.length, 80)));
+
+            if (section.content) {
+                lines.push(section.content);
+            }
+
+            lines.push('');
+        });
+    }
 
     lines.push('='.repeat(80));
 

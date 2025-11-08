@@ -67,6 +67,52 @@ const normalizeLineBreaks = (value) => {
     return normalized.replace(/[ \t]{3,}/g, ' ');
 };
 
+const hasMeaningfulContent = (value) => {
+    if (value === null || value === undefined) {
+        return false;
+    }
+
+    if (typeof value === 'string') {
+        return value.trim().length > 0;
+    }
+
+    if (Array.isArray(value)) {
+        return value.length > 0;
+    }
+
+    if (typeof value === 'object') {
+        return Object.keys(value).length > 0;
+    }
+
+    return true;
+};
+
+const validateRequiredFields = (payload, fields = []) => {
+    if (!payload) {
+        return { isValid: false, missing: fields.slice() };
+    }
+
+    const missing = fields.filter((field) => !hasMeaningfulContent(payload[field]));
+
+    return {
+        isValid: missing.length === 0,
+        missing
+    };
+};
+
+const convertHtmlToText = (html) => {
+    if (!html) {
+        return '';
+    }
+
+    try {
+        const converted = convert(String(html), HTML_TO_TEXT_OPTIONS);
+        return normalizeLineBreaks(converted);
+    } catch (_) {
+        return '';
+    }
+};
+
 const resolveDescription = ({ plainText = '', html = '' }) => {
     const normalizedHtml = typeof html === 'string' ? html.trim() : '';
     if (normalizedHtml) {
@@ -121,5 +167,9 @@ module.exports = {
     normalizeWhitespace,
     stripHtml,
     resolveDescription,
-    collectListText
+    collectListText,
+    convertHtmlToText,
+    normalizeLineBreaks,
+    hasMeaningfulContent,
+    validateRequiredFields
 };
