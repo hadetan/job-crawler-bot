@@ -1,10 +1,9 @@
 const { normalizeURL } = require('../../utils');
 const { createProviderHttpClient, normalizeWhitespace, convertHtmlToText, normalizeLineBreaks, stripHtml, validateRequiredFields } = require('../detail-helpers');
-const { mergeFilters, runApiCollector } = require('./api-collector');
+const { runApiCollector } = require('./api-collector');
 
 const LEVER_PROVIDER_ID = 'lever';
 const LEVER_API_BASE = 'https://jobs.lever.co/v0/postings';
-const SUPPORTED_FILTER_KEYS = new Set(['team', 'department', 'location', 'commitment', 'worktype', 'worktypev2']);
 const LEVER_API_TIMEOUT_MS = 45000;
 const httpClient = createProviderHttpClient({ timeout: LEVER_API_TIMEOUT_MS });
 const slugCache = new Map();
@@ -95,21 +94,13 @@ function parseLeverContextFromUrl(url) {
         const hostname = parsed.hostname;
         const loweredHost = hostname.toLowerCase();
         const pathSegments = parsed.pathname.split('/').filter(Boolean);
-        const filters = {};
-
-        parsed.searchParams.forEach((value, key) => {
-            if (SUPPORTED_FILTER_KEYS.has(key)) {
-                filters[key] = value;
-            }
-        });
 
         if (isSharedLeverHost(loweredHost)) {
             if (pathSegments.length > 0) {
                 const slug = decodeURIComponent(pathSegments[0] || '').trim();
                 return {
                     companySlug: slug || null,
-                    postingId: derivePostingId(pathSegments.slice(1)),
-                    filters
+                    postingId: derivePostingId(pathSegments.slice(1))
                 };
             }
         }
@@ -118,47 +109,22 @@ function parseLeverContextFromUrl(url) {
         if (hostSlug) {
             return {
                 companySlug: hostSlug,
-                postingId: derivePostingId(pathSegments),
-                filters
+                postingId: derivePostingId(pathSegments)
             };
         }
 
-        return { companySlug: null, postingId: null, filters };
+        return { companySlug: null, postingId: null };
     } catch (_) {
-        return { companySlug: null, postingId: null, filters: {} };
+        return { companySlug: null, postingId: null };
     }
-}
-
-function applyFilterValue(target, key, value) {
-    if (!value) {
-        return;
-    }
-
-    if (SUPPORTED_FILTER_KEYS.has(key)) {
-        if (!target[key]) {
-            target[key] = value;
-        }
-    }
-}
-
-function applyFiltersFromSearch(target, search) {
-    if (!search) {
-        return;
-    }
-
-    const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-    params.forEach((value, key) => {
-        applyFilterValue(target, key, value);
-    });
 }
 
 function parseLeverHintsFromHtml(html, baseUrl) {
     if (!html || typeof html !== 'string') {
-        return { slug: null, filters: {} };
+        return { slug: null };
     }
 
     const slugCandidates = new Set();
-    const filters = {};
 
     const addSlugCandidate = (value) => {
         if (!value) {
@@ -201,8 +167,6 @@ function parseLeverHintsFromHtml(html, baseUrl) {
             if (pathMatch && pathMatch[1]) {
                 addSlugCandidate(pathMatch[1]);
             }
-
-            applyFiltersFromSearch(filters, resolved.search);
         } catch (_) {
             // ignore resolution failures
         }
@@ -212,14 +176,6 @@ function parseLeverHintsFromHtml(html, baseUrl) {
     while ((match = dataDomainRegex.exec(html)) !== null) {
         addSlugCandidate(match[1]);
     }
-
-    SUPPORTED_FILTER_KEYS.forEach((key) => {
-        const attrRegex = new RegExp(`data-${key}=["']([^"']+)["']`, 'gi');
-        let attrMatch;
-        while ((attrMatch = attrRegex.exec(html)) !== null) {
-            applyFilterValue(filters, key, attrMatch[1]);
-        }
-    });
 
     const inlineSlugRegex = /lever\.co\/v0\/postings\/(\w[\w-]+)/gi;
     while ((match = inlineSlugRegex.exec(html)) !== null) {
@@ -232,25 +188,25 @@ function parseLeverHintsFromHtml(html, baseUrl) {
     }
 
     const slug = slugCandidates.values().next().value || null;
-    return { slug, filters };
+    return { slug };
 }
 
 async function discoverSlugFromHtml({ url, logger }) {
     const cached = getCachedSlug(url);
     if (cached) {
-        return { slug: cached, filters: {} };
+        return { slug: cached };
     }
 
     try {
         const response = await httpClient.get(url, { responseType: 'text' });
         const html = typeof response.data === 'string' ? response.data : '';
-        const { slug, filters } = parseLeverHintsFromHtml(html, url);
+        const { slug } = parseLeverHintsFromHtml(html, url);
 
         if (slug) {
             cacheSlug(url, slug);
         }
 
-        return { slug, filters };
+        return { slug };
     } catch (error) {
         if (logger) {
             if (typeof logger.debug === 'function') {
@@ -259,7 +215,7 @@ async function discoverSlugFromHtml({ url, logger }) {
                 logger.warn(`Lever slug discovery failed for ${url}: ${error.message}`);
             }
         }
-        return { slug: null, filters: {} };
+        return { slug: null };
     }
 }
 
@@ -268,7 +224,6 @@ function prepareJobDetail({ url, jobRecord, logger }) {
     const context = {
         companySlug: contextFromUrl.companySlug || null,
         postingId: contextFromUrl.postingId || null,
-        filters: contextFromUrl.filters || {},
         url
     };
 
@@ -283,8 +238,13 @@ function prepareJobDetail({ url, jobRecord, logger }) {
         if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
             try {
                 const parsed = JSON.parse(trimmed);
-                if (parsed && typeof parsed === 'object' && parsed.filters) {
-                    context.filters = { ...context.filters, ...parsed.filters };
+                if (parsed && typeof parsed === 'object') {
+                    if (parsed.companySlug && !context.companySlug) {
+                        context.companySlug = parsed.companySlug;
+                    }
+                    if (parsed.postingId && !context.postingId) {
+                        context.postingId = parsed.postingId;
+                    }
                 }
             } catch (_) {
                 // Ignore malformed remarks metadata.
@@ -327,17 +287,12 @@ const normalizeJobUrl = (url) => {
     }
 };
 
-const fetchListingsFromApi = async ({ companySlug, filters }) => {
+const fetchListingsFromApi = async ({ companySlug }) => {
     if (!companySlug) {
         return { jobUrls: [], diagnostics: { error: 'missing-slug' } };
     }
 
     const params = new URLSearchParams({ mode: 'json', limit: '50' });
-    Object.entries(filters || {}).forEach(([key, value]) => {
-        if (value) {
-            params.append(key, value);
-        }
-    });
 
     const baseApiUrl = `${LEVER_API_BASE}/${companySlug}`;
 
@@ -345,7 +300,7 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
     let safetyCounter = 0;
     const jobUrls = [];
     const dedupeKeys = new Set();
-    const diagnostics = { pages: 0, totalPostings: 0, companySlug, filters };
+    const diagnostics = { pages: 0, totalPostings: 0, companySlug };
 
     while (safetyCounter < 20) {
         const query = new URLSearchParams(params.toString());
@@ -361,7 +316,6 @@ const fetchListingsFromApi = async ({ companySlug, filters }) => {
         } catch (error) {
             error.leverContext = {
                 companySlug,
-                filters: { ...filters },
                 params: Object.fromEntries(query.entries())
             };
             throw error;
@@ -411,31 +365,25 @@ async function collectJobLinks({ url, logger }) {
         const contexts = [];
 
         if (contextFromUrl.companySlug) {
-            const baseFilters = { ...(contextFromUrl.filters || {}) };
             contexts.push({
                 companySlug: contextFromUrl.companySlug,
                 postingId: contextFromUrl.postingId || null,
-                filters: baseFilters,
                 source: 'url-path',
                 diagnostics: {
                     slug: contextFromUrl.companySlug,
-                    slugSource: 'url-path',
-                    filters: baseFilters
+                    slugSource: 'url-path'
                 }
             });
         } else {
             const discovery = await discoverSlugFromHtml({ url, logger });
             if (discovery.slug) {
-                const mergedFilters = mergeFilters(contextFromUrl.filters, discovery.filters);
                 contexts.push({
                     companySlug: discovery.slug,
                     postingId: contextFromUrl.postingId || null,
-                    filters: mergedFilters,
                     source: 'html-initial',
                     diagnostics: {
                         slug: discovery.slug,
-                        slugSource: 'html',
-                        filters: mergedFilters
+                        slugSource: 'html'
                     }
                 });
             }
@@ -445,10 +393,9 @@ async function collectJobLinks({ url, logger }) {
     };
 
     const fetchListings = async (attempt) => {
-        const { companySlug, filters } = attempt;
+        const { companySlug } = attempt;
         const response = await fetchListingsFromApi({
-            companySlug,
-            filters
+            companySlug
         });
 
         return {
@@ -464,16 +411,13 @@ async function collectJobLinks({ url, logger }) {
         if (status === 404) {
             const discovery = await discoverSlugFromHtml({ url, logger });
             if (discovery.slug && discovery.slug !== attempt.companySlug) {
-                const mergedFilters = mergeFilters(attempt.filters, discovery.filters);
                 return [{
                     companySlug: discovery.slug,
                     postingId: attempt.postingId || null,
-                    filters: mergedFilters,
                     source: 'html-refresh',
                     diagnostics: {
                         slug: discovery.slug,
-                        slugSource: 'html-refresh',
-                        filters: mergedFilters
+                        slugSource: 'html-refresh'
                     }
                 }];
             }
@@ -613,13 +557,11 @@ async function fetchJobDetail({ url, logger, context }) {
     const diagnostics = {
         companySlug: companySlug || null,
         postingId: postingId || null,
-        endpoint: endpoint || undefined,
-        filters: derivedContext && derivedContext.filters ? derivedContext.filters : undefined
+        endpoint: endpoint || undefined
     };
 
     const startedAt = Date.now();
     let job = null;
-    let strategy = 'lever-api';
 
     if (!endpoint) {
         diagnostics.error = 'missing-context';
@@ -692,7 +634,7 @@ async function fetchJobDetail({ url, logger, context }) {
 
     diagnostics.durationMs = diagnostics.durationMs || (Date.now() - startedAt);
 
-    return { job, strategy, diagnostics };
+    return { job, diagnostics };
 }
 
 module.exports = {

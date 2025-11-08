@@ -163,6 +163,7 @@ const runStage2 = async (options = {}) => {
             let providerDiagnostics = null;
             let providerApiEndpoint = null;
             let extractedEntries = [];
+            const jobMetadataMap = {};
 
             try {
                 const providerResult = await provider.collectJobLinks({
@@ -193,6 +194,31 @@ const runStage2 = async (options = {}) => {
                 log.info(`Provider ${providerId} returned no job links.`);
             }
 
+            extractedEntries.forEach((entry) => {
+                if (!entry || typeof entry !== 'object') {
+                    return;
+                }
+
+                if (!entry.metadata || typeof entry.metadata !== 'object') {
+                    return;
+                }
+
+                const cleaned = Object.entries(entry.metadata).reduce((acc, [key, value]) => {
+                    if (value === undefined || value === null) {
+                        return acc;
+                    }
+                    if (typeof value === 'object' && Object.keys(value).length === 0) {
+                        return acc;
+                    }
+                    acc[key] = value;
+                    return acc;
+                }, {});
+
+                if (Object.keys(cleaned).length > 0) {
+                    jobMetadataMap[entry.url] = cleaned;
+                }
+            });
+
             totalJobLinksExtracted += extractedEntries.length;
 
             const newLinks = [];
@@ -211,6 +237,19 @@ const runStage2 = async (options = {}) => {
                 newJobLinksAdded += newLinks.length;
             }
 
+            const existingEntry = report.link_extraction_report[url] || {};
+            const mergedMetadata = (() => {
+                const prior = existingEntry.jobMetadata && typeof existingEntry.jobMetadata === 'object'
+                    ? { ...existingEntry.jobMetadata }
+                    : {};
+
+                Object.entries(jobMetadataMap).forEach(([jobUrl, metadata]) => {
+                    prior[jobUrl] = { ...metadata };
+                });
+
+                return Object.keys(prior).length > 0 ? prior : null;
+            })();
+
             report.link_extraction_report[url] = {
                 status: true,
                 provider: providerId,
@@ -220,6 +259,9 @@ const runStage2 = async (options = {}) => {
                 error: null,
                 api: providerApiEndpoint
             };
+            if (mergedMetadata) {
+                report.link_extraction_report[url].jobMetadata = mergedMetadata;
+            }
             if (providerDiagnostics) {
                 report.link_extraction_report[url].diagnostics = providerDiagnostics;
             }

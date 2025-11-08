@@ -3,7 +3,7 @@ const fs = require('fs');
 const pLimit = require('p-limit');
 const config = require('../config');
 const log = require('../utils/logger');
-const { generateRequestId, setupJobsFolder, readJobsCsv, loadDetailReport } = require('../utils/request-helpers');
+const { generateRequestId, setupJobsFolder, readJobsCsv, loadDetailReport, loadLinkReport } = require('../utils/request-helpers');
 const { DEFAULT_PROVIDER_ID } = require('../job-boards');
 const processJobURL = require('../utils/process-job-url');
 
@@ -40,6 +40,7 @@ const runStage3 = async (options = {}) => {
     log.info(`Extraction folder: ${jobsDir}`);
 
     const jobsCsvPath = path.join(jobLinksDir, 'jobs.csv');
+    const linkReportPath = path.join(jobLinksDir, 'report.json');
     if (!fs.existsSync(jobsCsvPath)) {
         log.error(`jobs.csv not found at ${jobsCsvPath}`);
         process.exit(1);
@@ -102,12 +103,11 @@ const runStage3 = async (options = {}) => {
     }
 
     const detailReport = loadDetailReport(reportPath);
+    const linkReport = loadLinkReport(linkReportPath);
 
     const stats = {
         successCount: 0,
         failedCount: 0,
-        structuredCount: 0,
-        intelligentCount: 0,
         companyJobCounts: {}
     };
 
@@ -124,6 +124,7 @@ const runStage3 = async (options = {}) => {
                     jobsCsvPath,
                     detailReport,
                     reportPath,
+                    linkReport,
                     currentRetryCount: parseInt(job.RETRY, 10) || 0,
                     providerId: job.PROVIDER || DEFAULT_PROVIDER_ID,
                     jobRecord: job
@@ -139,8 +140,6 @@ const runStage3 = async (options = {}) => {
     if (skippedMaxRetries > 0) {
         log.info(`URLs skipped (max retries reached): ${skippedMaxRetries}`);
     }
-
-    log.info(`Extraction methods - Structured Data: ${stats.structuredCount}, Intelligent Analysis: ${stats.intelligentCount}`);
 
     if (stats.detailStrategyCounts && Object.keys(stats.detailStrategyCounts).length > 0) {
         log.info('Detail strategies used:');

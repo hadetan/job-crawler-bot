@@ -23,6 +23,7 @@ const processJobURL = async (url, index, total, jobsDir, stats, opts = {}) => {
         jobsCsvPath,
         detailReport,
         reportPath,
+        linkReport = null,
         currentRetryCount = 0,
         providerId: providerIdHint = DEFAULT_PROVIDER_ID,
         jobRecord = null
@@ -72,14 +73,16 @@ const processJobURL = async (url, index, total, jobsDir, stats, opts = {}) => {
             providerContext = await provider.prepareJobDetail({
                 url,
                 jobRecord,
-                logger: log
+                logger: log,
+                detailReport,
+                linkReport
             });
         } catch (prepareError) {
             log.warn(`Provider ${resolvedProviderId} prepareJobDetail failed for ${url}: ${prepareError.message}`);
         }
     }
 
-    log.progress(`Processing job ${index + 1}/${total}: ${url} (provider: ${resolvedProviderId})`);
+    log.progress(`Processing job ${index + 1}/${total}: ${url}`);
 
     const maxRetries = process.env.MAX_RETRIES || 3;
     let lastError = null;
@@ -87,7 +90,6 @@ const processJobURL = async (url, index, total, jobsDir, stats, opts = {}) => {
     let providerDiagnostics = null;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-        let usedProviderExtractor = false;
         const attemptNumber = attempt + 1;
 
         providerDiagnostics = null;
@@ -194,9 +196,7 @@ const processJobURL = async (url, index, total, jobsDir, stats, opts = {}) => {
                 stats.detailStrategyCounts = {};
             }
 
-            const extractionTag = jobData.source ? `${jobData.source}${usedProviderExtractor ? ' (provider)' : ''}` : (usedProviderExtractor ? 'provider' : 'unknown');
-            log.info(`Extracted via ${extractionTag}`);
-            log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}" [provider: ${resolvedProviderId}]`);
+            log.info(`Saved: ${companyName}/${fileName} - "${jobData.title}"`);
 
             if (jobsCsvPath) {
                 const fileNamePath = `${companyName}/${fileName}`;

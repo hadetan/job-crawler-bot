@@ -1,10 +1,9 @@
-const { normalizeURL } = require('../../utils');
+const { normalizeURL, extractCompanyName } = require('../../utils');
 const { createProviderHttpClient, normalizeWhitespace, convertHtmlToText, normalizeLineBreaks, stripHtml, validateRequiredFields } = require('../detail-helpers');
-const { mergeFilters, runApiCollector } = require('./api-collector');
+const { runApiCollector } = require('./api-collector');
 
 const GREENHOUSE_PROVIDER_ID = 'greenhouse';
 const GREENHOUSE_API_BASE = 'https://boards-api.greenhouse.io/v1/boards';
-const SUPPORTED_FILTER_KEYS = new Set(['department', 'departments', 'office', 'offices', 'location', 'job_type', 'employment_type']);
 const GREENHOUSE_API_TIMEOUT_MS = 45000;
 const JOBS_PER_PAGE = 50;
 const MAX_API_PAGES = 40;
@@ -51,33 +50,11 @@ function cacheBoardToken(url, boardToken) {
     boardTokenCache.set(key, boardToken);
 }
 
-function applyFilterValue(target, key, value) {
-    if (!value || !SUPPORTED_FILTER_KEYS.has(key)) {
-        return;
-    }
-
-    if (!target[key]) {
-        target[key] = value;
-    }
-}
-
-function applyFiltersFromSearch(target, search) {
-    if (!search) {
-        return;
-    }
-
-    const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-    params.forEach((value, key) => {
-        applyFilterValue(target, key, value);
-    });
-}
-
 function parseGreenhouseContextFromUrl(rawUrl) {
     try {
         const parsed = new URL(rawUrl);
         const hostname = parsed.hostname.toLowerCase();
         const pathSegments = parsed.pathname.split('/').filter(Boolean);
-        const filters = {};
         let boardToken = null;
         let jobId = null;
 
@@ -94,8 +71,6 @@ function parseGreenhouseContextFromUrl(rawUrl) {
             } else if (lowered === 'for' && !boardToken) {
                 boardToken = String(value).trim();
             }
-
-            applyFilterValue(filters, lowered, value);
         });
 
         if (hostname === 'boards.greenhouse.io') {
@@ -118,19 +93,18 @@ function parseGreenhouseContextFromUrl(rawUrl) {
             }
         }
 
-        return { boardToken, jobId, filters };
+        return { boardToken, jobId };
     } catch (_) {
-        return { boardToken: null, jobId: null, filters: {} };
+        return { boardToken: null, jobId: null };
     }
 }
 
 function parseGreenhouseHintsFromHtml(html, baseUrl) {
     if (!html || typeof html !== 'string') {
-        return { boardToken: null, filters: {} };
+        return { boardToken: null };
     }
 
     const boardCandidates = new Set();
-    const filters = {};
 
     const registerBoardCandidate = (value) => {
         if (!value) {
@@ -159,8 +133,6 @@ function parseGreenhouseHintsFromHtml(html, baseUrl) {
             if (searchParams.has('for')) {
                 registerBoardCandidate(searchParams.get('for'));
             }
-
-            applyFiltersFromSearch(filters, resolved.search);
 
             const apiMatch = pathname.match(/boards-api\.greenhouse\.io\/v1\/boards\/([\w-]+)/i);
             if (apiMatch && apiMatch[1]) {
@@ -199,34 +171,26 @@ function parseGreenhouseHintsFromHtml(html, baseUrl) {
         }
     }
 
-    SUPPORTED_FILTER_KEYS.forEach((key) => {
-        const attrRegex = new RegExp(`data-${key}=["']([^"']+)["']`, 'gi');
-        let attrMatch;
-        while ((attrMatch = attrRegex.exec(html)) !== null) {
-            applyFilterValue(filters, key, attrMatch[1]);
-        }
-    });
-
     const boardToken = boardCandidates.values().next().value || null;
-    return { boardToken, filters };
+    return { boardToken };
 }
 
 async function discoverBoardTokenFromHtml({ url, logger }) {
     const cached = getCachedBoardToken(url);
     if (cached) {
-        return { boardToken: cached, filters: {} };
+        return { boardToken: cached };
     }
 
     try {
         const response = await htmlHttpClient.get(url, { responseType: 'text' });
         const html = typeof response.data === 'string' ? response.data : '';
-        const { boardToken, filters } = parseGreenhouseHintsFromHtml(html, url);
+        const { boardToken } = parseGreenhouseHintsFromHtml(html, url);
 
         if (boardToken) {
             cacheBoardToken(url, boardToken);
         }
 
-        return { boardToken, filters };
+        return { boardToken };
     } catch (error) {
         if (logger) {
             if (typeof logger.debug === 'function') {
@@ -235,7 +199,7 @@ async function discoverBoardTokenFromHtml({ url, logger }) {
                 logger.warn(`Greenhouse board token discovery failed for ${url}: ${error.message}`);
             }
         }
-        return { boardToken: null, filters: {} };
+        return { boardToken: null };
     }
 }
 
@@ -318,7 +282,7 @@ function buildDescription(data) {
     return description || '';
 }
 
-async function fetchListingsFromApi({ boardToken, filters }) {
+async function fetchListingsFromApi({ boardToken }) {
     if (!boardToken) {
         return { jobUrls: [], jobEntries: [], diagnostics: { error: 'missing-board-token' } };
     }
@@ -326,7 +290,7 @@ async function fetchListingsFromApi({ boardToken, filters }) {
     const dedupe = new Set();
     const jobUrls = [];
     const jobEntries = [];
-    const diagnostics = { boardToken, filters: { ...(filters || {}) }, pages: 0, totalJobs: 0 };
+    const diagnostics = { boardToken, pages: 0, totalJobs: 0 };
     let page = 1;
 
     const baseApiUrl = `${GREENHOUSE_API_BASE}/${boardToken}/jobs`;
@@ -337,12 +301,6 @@ async function fetchListingsFromApi({ boardToken, filters }) {
         params.set('per_page', String(JOBS_PER_PAGE));
         params.set('content', 'false');
 
-        Object.entries(filters || {}).forEach(([key, value]) => {
-            if (value) {
-                params.append(key, value);
-            }
-        });
-
         let response;
         try {
             response = await httpClient.get(baseApiUrl, {
@@ -351,7 +309,6 @@ async function fetchListingsFromApi({ boardToken, filters }) {
         } catch (error) {
             error.greenhouseContext = {
                 boardToken,
-                filters: { ...(filters || {}) },
                 params: Object.fromEntries(params.entries())
             };
             throw error;
@@ -395,14 +352,6 @@ async function fetchListingsFromApi({ boardToken, filters }) {
                         entryMetadata.jobId = String(job.id);
                     }
 
-                    const filterKeys = Object.keys(filters || {}).filter((key) => filters[key]);
-                    if (filterKeys.length > 0) {
-                        entryMetadata.filters = filterKeys.reduce((acc, key) => {
-                            acc[key] = filters[key];
-                            return acc;
-                        }, {});
-                    }
-
                     jobEntries.push(Object.keys(entryMetadata).length > 0
                         ? { url: canonical, metadata: entryMetadata }
                         : { url: canonical });
@@ -423,6 +372,238 @@ async function fetchListingsFromApi({ boardToken, filters }) {
     return { jobUrls, jobEntries, diagnostics, api: baseApiUrl };
 }
 
+function extractBoardTokenFromApiUrl(apiUrl) {
+    if (typeof apiUrl !== 'string') {
+        return null;
+    }
+
+    const match = apiUrl.match(/boards\/([^/]+)\/(?:jobs|job)/i);
+    return match && match[1] ? match[1] : null;
+}
+
+function extractBoardTokenFromBoardUrl(boardUrl) {
+    if (typeof boardUrl !== 'string') {
+        return null;
+    }
+
+    try {
+        const parsed = new URL(boardUrl);
+        const segments = parsed.pathname.split('/').filter(Boolean);
+        if (segments.length > 0) {
+            return segments[segments.length - 1];
+        }
+    } catch (_) {
+        // Fall through to regex attempt
+    }
+
+    const regexMatch = boardUrl.match(/boards(?:-api)?\.greenhouse\.io\/[^/]*\/([^/?#]+)/i);
+    return regexMatch && regexMatch[1] ? regexMatch[1] : null;
+}
+
+function resolveBoardContextFromLinkReport({ url, linkReport }) {
+    if (!linkReport || typeof linkReport !== 'object') {
+        return { boardToken: null };
+    }
+
+    const reportEntries = linkReport.link_extraction_report && typeof linkReport.link_extraction_report === 'object'
+        ? linkReport.link_extraction_report
+        : (typeof linkReport === 'object' ? linkReport : null);
+
+    if (!reportEntries) {
+        return { boardToken: null };
+    }
+
+    const normalizedTargetUrl = normalizeJobUrl(url);
+    const candidateSlug = (() => {
+        try {
+            const extracted = extractCompanyName(url);
+            return extracted ? extracted.toLowerCase() : null;
+        } catch (_) {
+            return null;
+        }
+    })();
+
+    const contexts = [];
+    const seenTokens = new Set();
+
+    const findMetadataMatch = (metadata) => {
+        if (!metadata || typeof metadata !== 'object') {
+            return null;
+        }
+
+        if (metadata[url]) {
+            return { jobUrl: url, metadata: metadata[url] };
+        }
+
+        if (normalizedTargetUrl && normalizedTargetUrl !== url && metadata[normalizedTargetUrl]) {
+            return { jobUrl: normalizedTargetUrl, metadata: metadata[normalizedTargetUrl] };
+        }
+
+        if (normalizedTargetUrl) {
+            for (const [candidateUrl, entry] of Object.entries(metadata)) {
+                if (!entry || typeof entry !== 'object') {
+                    continue;
+                }
+
+                const normalizedCandidate = normalizeJobUrl(candidateUrl);
+                if (normalizedCandidate === normalizedTargetUrl) {
+                    return { jobUrl: candidateUrl, metadata: entry };
+                }
+            }
+        }
+
+        return null;
+    };
+
+    for (const [entryKey, entryValue] of Object.entries(reportEntries)) {
+        if (!entryValue || typeof entryValue !== 'object') {
+            continue;
+        }
+
+        const diagnostics = entryValue.diagnostics && typeof entryValue.diagnostics === 'object'
+            ? entryValue.diagnostics
+            : {};
+
+        const jobMetadata = entryValue.jobMetadata && typeof entryValue.jobMetadata === 'object'
+            ? entryValue.jobMetadata
+            : null;
+
+        const metadataMatch = findMetadataMatch(jobMetadata);
+        if (metadataMatch) {
+            const metadataToken = metadataMatch.metadata.boardToken
+                || diagnostics.boardToken
+                || (entryValue.api ? extractBoardTokenFromApiUrl(entryValue.api) : null)
+                || extractBoardTokenFromBoardUrl(entryKey);
+
+            const normalizedToken = typeof metadataToken === 'string'
+                ? metadataToken.trim()
+                : (metadataToken ? String(metadataToken).trim() : '');
+
+            if (normalizedToken) {
+                const resolved = { boardToken: normalizedToken };
+                if (metadataMatch.metadata.jobId !== undefined && metadataMatch.metadata.jobId !== null) {
+                    resolved.jobId = String(metadataMatch.metadata.jobId);
+                }
+                return resolved;
+            }
+        }
+
+        let boardToken = diagnostics.boardToken || null;
+
+        if (!boardToken && entryValue.api) {
+            boardToken = extractBoardTokenFromApiUrl(entryValue.api);
+        }
+
+        if (!boardToken && typeof entryKey === 'string') {
+            boardToken = extractBoardTokenFromBoardUrl(entryKey);
+        }
+
+        if (!boardToken) {
+            continue;
+        }
+
+        const boardTokenString = typeof boardToken === 'string' ? boardToken.trim() : String(boardToken).trim();
+        if (!boardTokenString) {
+            continue;
+        }
+
+        const normalizedToken = boardTokenString.toLowerCase();
+        if (seenTokens.has(normalizedToken)) {
+            continue;
+        }
+
+        const score = (() => {
+            if (candidateSlug && normalizedToken === candidateSlug) {
+                return 30;
+            }
+            if (candidateSlug && normalizedToken.includes(candidateSlug)) {
+                return 20;
+            }
+            if (candidateSlug && typeof entryKey === 'string' && entryKey.toLowerCase().includes(candidateSlug)) {
+                return 10;
+            }
+            return 1;
+        })();
+
+        contexts.push({ boardToken: boardTokenString, score });
+        seenTokens.add(normalizedToken);
+    }
+
+    if (contexts.length === 0) {
+        return { boardToken: null };
+    }
+
+    contexts.sort((a, b) => b.score - a.score);
+    const best = contexts[0];
+
+    if (best && best.score > 1) {
+        return { boardToken: best.boardToken };
+    }
+
+    if (contexts.length === 1 && best) {
+        return { boardToken: best.boardToken };
+    }
+
+    return { boardToken: null };
+}
+
+function resolveBoardContextFromDetailReport({ url, detailReport }) {
+    if (!detailReport || typeof detailReport !== 'object') {
+        return { boardToken: null };
+    }
+
+    const reportEntries = detailReport.detail_extraction_report && typeof detailReport.detail_extraction_report === 'object'
+        ? detailReport.detail_extraction_report
+        : null;
+
+    if (!reportEntries) {
+        return { boardToken: null };
+    }
+
+    const companyKey = (() => {
+        try {
+            const extracted = extractCompanyName(url);
+            return extracted || null;
+        } catch (_) {
+            return null;
+        }
+    })();
+
+    if (!companyKey || !reportEntries[companyKey]) {
+        return { boardToken: null };
+    }
+
+    const companyReport = reportEntries[companyKey];
+    const pools = [];
+
+    if (Array.isArray(companyReport.passedUrls)) {
+        pools.push(companyReport.passedUrls);
+    }
+
+    if (Array.isArray(companyReport.failedUrls)) {
+        pools.push(companyReport.failedUrls);
+    }
+
+    for (const pool of pools) {
+        for (const entry of pool) {
+            if (!entry || typeof entry !== 'object') {
+                continue;
+            }
+
+            const diagnostics = entry.diagnostics;
+            if (!diagnostics || typeof diagnostics !== 'object') {
+                continue;
+            }
+
+            if (diagnostics.boardToken) {
+                return { boardToken: diagnostics.boardToken };
+            }
+        }
+    }
+
+    return { boardToken: null };
+}
+
 async function collectJobLinks({ url, logger }) {
     const contextFromUrl = parseGreenhouseContextFromUrl(url);
 
@@ -430,29 +611,23 @@ async function collectJobLinks({ url, logger }) {
         const contexts = [];
 
         if (contextFromUrl.boardToken) {
-            const baseFilters = { ...(contextFromUrl.filters || {}) };
             contexts.push({
                 boardToken: contextFromUrl.boardToken,
-                filters: baseFilters,
                 source: 'url-path',
                 diagnostics: {
                     boardToken: contextFromUrl.boardToken,
-                    tokenSource: 'url-path',
-                    filters: baseFilters
+                    tokenSource: 'url-path'
                 }
             });
         } else {
             const discovery = await discoverBoardTokenFromHtml({ url, logger });
             if (discovery.boardToken) {
-                const mergedFilters = mergeFilters(contextFromUrl.filters, discovery.filters);
                 contexts.push({
                     boardToken: discovery.boardToken,
-                    filters: mergedFilters,
                     source: 'html-discovery',
                     diagnostics: {
                         boardToken: discovery.boardToken,
-                        tokenSource: 'html',
-                        filters: mergedFilters
+                        tokenSource: 'html'
                     }
                 });
             }
@@ -462,8 +637,8 @@ async function collectJobLinks({ url, logger }) {
     };
 
     const fetchListings = async (attempt) => {
-        const { boardToken, filters } = attempt;
-        const result = await fetchListingsFromApi({ boardToken, filters });
+        const { boardToken } = attempt;
+        const result = await fetchListingsFromApi({ boardToken });
         return {
             jobUrls: result.jobUrls,
             jobEntries: result.jobEntries,
@@ -477,15 +652,12 @@ async function collectJobLinks({ url, logger }) {
         if (status === 404 || status === 410) {
             const discovery = await discoverBoardTokenFromHtml({ url, logger });
             if (discovery.boardToken && discovery.boardToken !== attempt.boardToken) {
-                const mergedFilters = mergeFilters(attempt.filters, discovery.filters);
                 return [{
                     boardToken: discovery.boardToken,
-                    filters: mergedFilters,
                     source: 'html-refresh',
                     diagnostics: {
                         boardToken: discovery.boardToken,
-                        tokenSource: 'html-refresh',
-                        filters: mergedFilters
+                        tokenSource: 'html-refresh'
                     }
                 }];
             }
@@ -527,12 +699,11 @@ async function collectJobLinks({ url, logger }) {
     throw error;
 }
 
-function prepareJobDetail({ url, jobRecord, logger }) {
+function prepareJobDetail({ url, jobRecord, logger, detailReport, linkReport }) {
     const contextFromUrl = parseGreenhouseContextFromUrl(url);
     const context = {
         boardToken: contextFromUrl.boardToken || null,
         jobId: contextFromUrl.jobId || null,
-        filters: contextFromUrl.filters || {},
         url
     };
 
@@ -554,9 +725,6 @@ function prepareJobDetail({ url, jobRecord, logger }) {
                     if (parsed.jobId && !context.jobId) {
                         context.jobId = parsed.jobId;
                     }
-                    if (parsed.filters && typeof parsed.filters === 'object') {
-                        context.filters = { ...context.filters, ...parsed.filters };
-                    }
                 }
             } catch (_) {
                 // ignore malformed remarks metadata
@@ -564,8 +732,29 @@ function prepareJobDetail({ url, jobRecord, logger }) {
         }
     }
 
+    if (!context.boardToken || !context.jobId) {
+        const linkReportContext = resolveBoardContextFromLinkReport({ url, linkReport });
+        if (linkReportContext.boardToken && !context.boardToken) {
+            context.boardToken = linkReportContext.boardToken;
+        }
+        if (linkReportContext.jobId && !context.jobId) {
+            context.jobId = linkReportContext.jobId;
+        }
+    }
+
+    if (!context.boardToken) {
+        const detailReportContext = resolveBoardContextFromDetailReport({ url, detailReport });
+        if (detailReportContext.boardToken) {
+            context.boardToken = detailReportContext.boardToken;
+        }
+    }
+
     if (!context.endpoint && context.boardToken && context.jobId) {
         context.endpoint = `${GREENHOUSE_API_BASE}/${context.boardToken}/jobs/${context.jobId}`;
+    }
+
+    if (context.boardToken) {
+        cacheBoardToken(url, context.boardToken);
     }
 
     return context;
@@ -581,13 +770,24 @@ async function fetchJobDetail({ url, logger, context }) {
     let endpoint = derivedContext && derivedContext.endpoint
         ? derivedContext.endpoint
         : (boardToken && jobId ? `${GREENHOUSE_API_BASE}/${boardToken}/jobs/${jobId}` : null);
-    let filters = derivedContext && derivedContext.filters ? { ...derivedContext.filters } : undefined;
 
     const diagnostics = {
         boardToken: boardToken || null,
         jobId: jobId || null,
-        endpoint: endpoint || undefined,
-        filters
+        endpoint: endpoint || undefined
+    };
+
+    const startedHr = process.hrtime.bigint();
+    const computeDuration = () => {
+        const elapsedNs = process.hrtime.bigint() - startedHr;
+        const elapsedMs = Number(elapsedNs) / 1e6;
+        if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
+            return 0;
+        }
+        if (elapsedMs >= 1) {
+            return Math.round(elapsedMs);
+        }
+        return Number(elapsedMs.toFixed(3));
     };
 
     const ensureEndpoint = async () => {
@@ -604,14 +804,9 @@ async function fetchJobDetail({ url, logger, context }) {
             if (discovery.boardToken) {
                 boardToken = discovery.boardToken;
                 diagnostics.boardToken = boardToken;
-                const mergedFilters = mergeFilters(filters || {}, discovery.filters || {});
-                const hasMergedFilters = Object.keys(mergedFilters).length > 0;
-                filters = hasMergedFilters ? mergedFilters : undefined;
-                diagnostics.filters = filters;
 
                 if (derivedContext) {
                     derivedContext.boardToken = boardToken;
-                    derivedContext.filters = filters;
                 }
             }
         }
@@ -630,9 +825,7 @@ async function fetchJobDetail({ url, logger, context }) {
     endpoint = await ensureEndpoint();
     diagnostics.endpoint = endpoint || diagnostics.endpoint;
     diagnostics.boardToken = boardToken || diagnostics.boardToken;
-    diagnostics.filters = filters;
 
-    const startedAt = Date.now();
     let job = null;
 
     if (!endpoint) {
@@ -641,7 +834,7 @@ async function fetchJobDetail({ url, logger, context }) {
         try {
             const response = await httpClient.get(endpoint);
             diagnostics.status = response.status;
-            diagnostics.durationMs = Date.now() - startedAt;
+            diagnostics.durationMs = computeDuration();
 
             const data = response.data || {};
             const title = normalizeWhitespace(data.title || data.name || '');
@@ -676,7 +869,36 @@ async function fetchJobDetail({ url, logger, context }) {
         } catch (error) {
             diagnostics.error = error.message;
             diagnostics.status = error.response && error.response.status ? error.response.status : undefined;
-            diagnostics.durationMs = Date.now() - startedAt;
+            diagnostics.durationMs = computeDuration();
+            if (!diagnostics.endpoint) {
+                const attemptedUrl = (() => {
+                    if (!error || !error.config) {
+                        return null;
+                    }
+
+                    const { baseURL, url: requestUrl } = error.config;
+                    if (requestUrl && /^https?:\/\//i.test(requestUrl)) {
+                        return requestUrl;
+                    }
+
+                    if (baseURL) {
+                        try {
+                            if (requestUrl) {
+                                return new URL(requestUrl, baseURL).toString();
+                            }
+                            return baseURL;
+                        } catch (_) {
+                            return null;
+                        }
+                    }
+
+                    return requestUrl || null;
+                })();
+
+                if (attemptedUrl) {
+                    diagnostics.endpoint = attemptedUrl;
+                }
+            }
 
             if (logger && typeof logger.warn === 'function') {
                 logger.warn(`Greenhouse job detail API failed for ${url}: ${error.message}`);
@@ -684,7 +906,13 @@ async function fetchJobDetail({ url, logger, context }) {
         }
     }
 
-    diagnostics.durationMs = diagnostics.durationMs || (Date.now() - startedAt);
+    if (diagnostics.durationMs === undefined) {
+        diagnostics.durationMs = computeDuration();
+    }
+
+    if (!diagnostics.endpoint && endpoint) {
+        diagnostics.endpoint = endpoint;
+    }
 
     return { job, diagnostics };
 }

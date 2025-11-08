@@ -1,19 +1,3 @@
-const mergeFilters = (base = {}, extra = {}) => {
-    const result = { ...(base || {}) };
-
-    Object.entries(extra || {}).forEach(([key, value]) => {
-        if (!value) {
-            return;
-        }
-
-        if (!result[key]) {
-            result[key] = value;
-        }
-    });
-
-    return result;
-};
-
 const buildAttemptDiagnostics = (attempts) => {
     const attemptTrace = attempts.map((entry) => ({
         key: entry.key,
@@ -234,6 +218,5 @@ async function runApiCollector({
 }
 
 module.exports = {
-    mergeFilters,
     runApiCollector
 };
